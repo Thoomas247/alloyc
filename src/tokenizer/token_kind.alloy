@@ -1,0 +1,138 @@
+import std::string;
+import std::vector;
+import std::macros;
+
+type StringPair = struct {
+    first: &[u8],
+    second: &[u8]
+};
+
+macro string_pair(first: &[u8], second: &[u8]) {
+    return StringPair { .first = first, .second = second };
+}
+
+macro keyword_map() {
+    return [
+        "import",
+        "macro", "extern", "fn",
+        "type", "enum", "struct",
+        "const", "var",
+        "if", "else", "while", "for", "match",
+        "break", "yield", "return",
+        "new", "move",
+        "self",
+        "pub", "exp",
+        "true", "false",
+        "interface",
+        "as", "is", "to"
+    ];
+}
+
+macro operator_map() {
+    return [
+        #string_pair("plus", "+"),
+        #string_pair("minus", "-"),
+        #string_pair("asterisk", "*"),
+        #string_pair("slash", "/"),
+        #string_pair("percent", "%"),
+
+        #string_pair("plus_equal", "+="),
+        #string_pair("minus_equal", "-="),
+        #string_pair("asterisk_equal", "*="),
+        #string_pair("slash_equal", "/="),
+        #string_pair("percent_equal", "%="),
+        #string_pair("shift_left_equal", "<<="),
+        #string_pair("shift_right_equal", ">>="),
+        #string_pair("ampersand_equal", "&="),
+        #string_pair("pipe_equal", "|="),
+        #string_pair("caret_equal", "^="),
+
+        #string_pair("equal_equal", "=="),
+        #string_pair("bang_equal", "!="),
+        #string_pair("angle_left", "<"),
+        #string_pair("angle_left_equal", "<="),
+        #string_pair("angle_right", ">"),
+        #string_pair("angle_right_equal", ">="),
+        #string_pair("ampersand_ampersand", "&&"),
+        #string_pair("pipe_pipe", "||"),
+        #string_pair("bang", "!"),
+
+        #string_pair("ampersand", "&"),
+        #string_pair("pipe", "|"),
+        #string_pair("caret", "^"),
+        #string_pair("tilde", "~"),
+        #string_pair("shift_left", "<<"),
+        #string_pair("shift_right", ">>"),
+
+        #string_pair("equal", "="),
+
+        #string_pair("arrow", "->"),
+
+        #string_pair("colon_colon", "::"),
+
+        #string_pair("dot", "."),
+
+        #string_pair("dot_dot", ".."),
+
+        #string_pair("ellipsis", "..."),
+
+        #string_pair("colon", ":"),
+
+        #string_pair("comma", ","),
+        #string_pair("semicolon", ";"),
+
+        #string_pair("parenthesis_left", "("),
+        #string_pair("parenthesis_right", ")"),
+        #string_pair("brace_left", "{"),
+        #string_pair("brace_right", "}"),
+        #string_pair("bracket_left", "["),
+        #string_pair("bracket_right", "]"),
+
+        #string_pair("hash", "#")
+    ];
+}
+
+macro token_kind_names() {
+    var names = Vector::empty<&[u8]>();
+
+    names.push("end_of_file");
+
+    names.push("comment");
+
+    names.push("identifier");
+
+    names.push("integer_literal");
+    names.push("float_literal");
+    names.push("string_literal");
+    names.push("char_literal");
+
+    for (#keyword_map()) |kw| {
+        var name = String::from("kw_");
+        name.append(kw);
+        names.push(name)
+    }
+
+    for (#operator_map()) |op| {
+        var name = String::from("op_");
+        name.append(op.first);
+        names.push(name)
+    }
+
+    return names;
+}
+
+macro token_kind_enum() {
+    var t = #enum_type();
+
+    for (#token_kind_names()) |n| {
+        t.add_member(n.view(), #void);
+    }
+
+    return t;
+}
+
+pub type TokenKind = #token_kind_enum();
+
+pub fn name(self tokenKind: &TokenKind) -> &[u8] {
+    return (#TokenKind.member_names())[tokenKind as u8];
+}

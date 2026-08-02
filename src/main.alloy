@@ -1,3 +1,15 @@
+import std::io;
+
+import tokenizer::tokenizer;
+
 fn main() {
+    const dir_path = "spec/samples/run_demo.alloy";
+
+    if (read_file(dir_path) is Option::Some) |src| {
+        print_line("File opened successfully.");
+        tokenize(&src);
+    } else {
+        print_error_line("Failed to read file.");
+    }
 
 }
