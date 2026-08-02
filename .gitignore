@@ -1,0 +1,9 @@
+# compiler output
+*.exe
+*.pdb
+*.ll
+*.obj
+*.alloylib
+
+# bootstrap compiler copied out of spec/bin
+/bin/
