@@ -1,15 +1,25 @@
 import std::io;
+import std::process;
 
 import tokenizer::tokenizer;
 
 fn main() {
-    const dir_path = "spec/samples/run_demo.alloy";
+    const entry_path = "spec/samples/run_demo.alloy";
 
-    if (read_file(dir_path) is Option::Some) |src| {
-        print_line("File opened successfully.");
-        tokenize(&src);
-    } else {
-        print_error_line("Failed to read file.");
-    }
+    compile_module(&entry_path);
+}
 
+fn compile_module(path: &[u8]) {
+    const src = match (read_file(&path)) {
+        Option::Some |&src| {
+            yield src;
+        }
+        else {
+            print_error_line("Failed to read file.");
+            return;
+        }
+    };
+
+    const tokens = tokenize(&src);
+    tokens.debug_print();
 }

@@ -1,0 +1,38 @@
+import std::iterable;
+
+pub type SourceCursor = struct {
+    src: &[u8],
+    index: u64
+};
+
+// Returns the current character and moves the cursor forward, or ::None if past the end.
+pub fn next(self cursor: &var SourceCursor) -> Option<u8> {
+    if (cursor.index >= cursor.src.length()) {
+        return ::None;
+    }
+
+    cursor.index += 1;
+    return ::Some(cursor.src[cursor.index - 1]);
+}
+
+// Returns true if there are more characters to read, false otherwise.
+pub fn has_next(self cursor: &SourceCursor) -> bool {
+    return (cursor.index + 1) < cursor.src.length();
+}
+
+// Returns the current character without moving the cursor.
+pub fn peek(self cursor: &SourceCursor) -> Option<u8> {
+    return cursor.peek(0);
+}
+
+// Returns the character `offset` positions ahead.
+// Set offset to 0 for current character.
+pub fn peek(self cursor: &SourceCursor, offset: u64) -> Option<u8> {
+    const index = cursor.index + offset;
+
+    if (index >= cursor.src.length()) {
+        return ::None;
+    }
+
+    return ::Some(cursor.src[index]);
+}

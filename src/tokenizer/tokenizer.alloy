@@ -1,29 +1,157 @@
-import token_kind;
 import std::string;
+import std::io as io;
 
-interface Serializable {
-    fn to_string() -> &[u8];
-}
+import token_kind;
+import token;
+import source_cursor;
 
-type Token : Serializable = struct {
-    kind: TokenKind,
-    str: &[u8]
+type TokenizerState = struct {
+    cursor: SourceCursor,
+    tokens: Vector<Token>
 };
 
-fn to_string(self token: &Token) -> &[u8] {
-    const kind_name = token.kind.name();
-    const separator = " - ";
-    const value = &token.str;
+pub fn tokenize(src: &[u8]) -> Vector<Token> {
+    var state = TokenizerState {
+        .cursor = SourceCursor {
+            .src = &src,
+            .index = 0
+        },
+        .tokens = Vector::empty()
+    };
 
-    var str = String::with_capacity(kind_name.length() + separator.length() + value.length());
+    while (state.cursor.has_next()) {
+        while (skip_whitespace(&state) || skip_comments(&state)) {}
 
-    str.append(kind_name);
-    str.append(separator);
-    str.append(value);
+        tokenize_identifier(&state);
+    }
 
-    return str.view();
+    state.tokens.push(Token { .kind = ::end_of_file, .view = "" });
+
+    return state.tokens;
 }
 
-pub fn tokenize(src: &[u8]) {
+pub fn debug_print(self tokens: &Vector<Token>) {
+    for (tokens) |&t| {
+        io::print_line(&t.to_string());
+    }
+}
 
+fn is_whitespace(c: u8) -> bool {
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r';
+}
+
+fn is_letter(c: u8) -> bool {
+    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
+}
+
+fn is_digit(c: u8) -> bool {
+    return (c >= '0' && c <= '9');
+}
+
+fn is_identifier_legal(c: u8) -> bool {
+    return c == '_' || is_letter(c) || is_digit(c);
+}
+
+fn is_operator_legal(c: u8) -> bool {
+    return (c >= '!' && c <= '/') ||
+        (c >= ':' && c <= '>') ||
+        (c >= '[' && c <= '^') ||
+        (c >= '{' && c <= '~');
+}
+
+fn skip_whitespace(state: &var TokenizerState) -> bool {
+    var skipped = false;
+    while (state.cursor.peek() is ::Some |&c| && is_whitespace(c)) {
+        skipped = true;
+        state.cursor.next();
+    }
+
+    return skipped;
+}
+
+fn skip_comments(state: &var TokenizerState) -> bool {
+    if (state.cursor.peek() is ::Some |&first| && first == '/' && state.cursor.peek(1) is ::Some |&second|) {
+        match (second) {
+            '/' {
+                // single line comment, go until the end of the line
+                state.cursor.next();
+                state.cursor.next();
+
+                while (state.cursor.peek() is ::Some |&c| && c != '\n') {
+                    state.cursor.next();
+                }
+
+                return true;
+            }
+            '*' {
+                // multi-line comment, go until matching closing tag
+                state.cursor.next();
+                state.cursor.next();
+
+                var depth = 1;
+                while (depth > 0 && state.cursor.peek() is ::Some |&first|) {
+                    if (state.cursor.peek(1) is ::Some |&second|) {
+                        if (first == '*' && second == '/') {
+                            depth -= 1;
+                            state.cursor.next();
+                        } else if (first == '/' && second == '*') {
+                            depth += 1;
+                            state.cursor.next();
+                        }
+                    }
+                    state.cursor.next();
+                }
+
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+fn tokenize_identifier(state: &var TokenizerState) -> bool {
+    if (state.cursor.peek() is ::Some |first| && first != '_' && !is_letter(first)) {
+        return false;
+    }
+
+    const start_index = state.cursor.index;
+    while (state.cursor.peek() is ::Some |c| && is_identifier_legal(c)) {
+        state.cursor.next();
+    }
+
+    const end_index = state.cursor.index;
+    const token_view = state.cursor.src[start_index..end_index];
+
+    const token_kind = if (keyword_token_kind(&token_view) is ::Some |token_kind|) {
+        yield token_kind;
+    } else {
+        yield ::identifier;
+    };
+
+    state.tokens.push(Token { .kind = token_kind, .view = &token_view });
+
+    return true;
+}
+
+fn tokenize_operator(state: &var TokenizerState) -> bool {
+    if (state.cursor.peek() is ::Some |first| && !is_operator_legal(first)) {
+        return false;
+    }
+
+    const start_index = state.cursor.index;
+    while (state.cursor.peek() is ::Some |c| && is_operator_legal(c)) {
+        state.cursor.next();
+    }
+
+    const end_index = state.cursor.index;
+    const token_view = state.cursor.src[start_index..end_index];
+
+    if (operator_token_kind() is ::Some |tooken_kind|) {
+        state.tokens.push(Token { .kind = token_kind, .view = &token_view });
+    } else {
+        state.tokens.push(Token { .kind = ::error_invalid_operator, .view = token_view });
+    }
+
+    return true;
 }

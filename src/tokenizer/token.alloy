@@ -1,0 +1,20 @@
+import token_kind;
+
+pub type Token = struct {
+    kind: TokenKind,
+    view: &[u8]
+};
+
+pub fn to_string(self token: &Token) -> &[u8] {
+    const kind_name = &token.kind.name();
+    const separator = " - ";
+    const value = &token.view;
+
+    var str = String::with_capacity(kind_name.length() + separator.length() + value.length());
+
+    str.append(&kind_name);
+    str.append(&separator);
+    str.append(&value);
+
+    return &str.view();
+}

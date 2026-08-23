@@ -2,16 +2,30 @@ import std::string;
 import std::vector;
 import std::macros;
 
-type StringPair = struct {
-    first: &[u8],
-    second: &[u8]
+type OperatorEntry = struct {
+    name: &[u8],
+    op: &[u8]
 };
 
-macro string_pair(first: &[u8], second: &[u8]) {
-    return StringPair { .first = first, .second = second };
+macro make_op_entry(name: &[u8], op: &[u8]) -> OperatorEntry {
+    return OperatorEntry { .name = name, .op = op };
 }
 
-macro keyword_map() {
+macro error_tokens() -> &[&[u8]] {
+    return ["error_invalid_operator"];
+}
+
+macro core_tokens() -> &[&[u8]] {
+    return [
+        "end_of_file",
+        "comment",
+        "identifier",
+        "integer_literal", "float_literal", "string_literal", "char_literal"
+    ];
+}
+
+// List of all keywords in the language.
+macro keywords() -> &[&[u8]] {
     return [
         "import",
         "macro", "extern", "fn",
@@ -28,104 +42,94 @@ macro keyword_map() {
     ];
 }
 
-macro operator_map() {
+// List of operator names to operator symbols.
+macro operators() -> &[OperatorEntry] {
     return [
-        #string_pair("plus", "+"),
-        #string_pair("minus", "-"),
-        #string_pair("asterisk", "*"),
-        #string_pair("slash", "/"),
-        #string_pair("percent", "%"),
+        #make_op_entry("plus", "+"),
+        #make_op_entry("minus", "-"),
+        #make_op_entry("asterisk", "*"),
+        #make_op_entry("slash", "/"),
+        #make_op_entry("percent", "%"),
 
-        #string_pair("plus_equal", "+="),
-        #string_pair("minus_equal", "-="),
-        #string_pair("asterisk_equal", "*="),
-        #string_pair("slash_equal", "/="),
-        #string_pair("percent_equal", "%="),
-        #string_pair("shift_left_equal", "<<="),
-        #string_pair("shift_right_equal", ">>="),
-        #string_pair("ampersand_equal", "&="),
-        #string_pair("pipe_equal", "|="),
-        #string_pair("caret_equal", "^="),
+        #make_op_entry("plus_equal", "+="),
+        #make_op_entry("minus_equal", "-="),
+        #make_op_entry("asterisk_equal", "*="),
+        #make_op_entry("slash_equal", "/="),
+        #make_op_entry("percent_equal", "%="),
+        #make_op_entry("shift_left_equal", "<<="),
+        #make_op_entry("shift_right_equal", ">>="),
+        #make_op_entry("ampersand_equal", "&="),
+        #make_op_entry("pipe_equal", "|="),
+        #make_op_entry("caret_equal", "^="),
 
-        #string_pair("equal_equal", "=="),
-        #string_pair("bang_equal", "!="),
-        #string_pair("angle_left", "<"),
-        #string_pair("angle_left_equal", "<="),
-        #string_pair("angle_right", ">"),
-        #string_pair("angle_right_equal", ">="),
-        #string_pair("ampersand_ampersand", "&&"),
-        #string_pair("pipe_pipe", "||"),
-        #string_pair("bang", "!"),
+        #make_op_entry("equal_equal", "=="),
+        #make_op_entry("bang_equal", "!="),
+        #make_op_entry("angle_left", "<"),
+        #make_op_entry("angle_left_equal", "<="),
+        #make_op_entry("angle_right", ">"),
+        #make_op_entry("angle_right_equal", ">="),
+        #make_op_entry("ampersand_ampersand", "&&"),
+        #make_op_entry("pipe_pipe", "||"),
+        #make_op_entry("bang", "!"),
 
-        #string_pair("ampersand", "&"),
-        #string_pair("pipe", "|"),
-        #string_pair("caret", "^"),
-        #string_pair("tilde", "~"),
-        #string_pair("shift_left", "<<"),
-        #string_pair("shift_right", ">>"),
+        #make_op_entry("ampersand", "&"),
+        #make_op_entry("pipe", "|"),
+        #make_op_entry("caret", "^"),
+        #make_op_entry("tilde", "~"),
+        #make_op_entry("shift_left", "<<"),
+        #make_op_entry("shift_right", ">>"),
 
-        #string_pair("equal", "="),
+        #make_op_entry("equal", "="),
 
-        #string_pair("arrow", "->"),
+        #make_op_entry("arrow", "->"),
 
-        #string_pair("colon_colon", "::"),
+        #make_op_entry("colon_colon", "::"),
 
-        #string_pair("dot", "."),
+        #make_op_entry("dot", "."),
 
-        #string_pair("dot_dot", ".."),
+        #make_op_entry("dot_dot", ".."),
 
-        #string_pair("ellipsis", "..."),
+        #make_op_entry("ellipsis", "..."),
 
-        #string_pair("colon", ":"),
+        #make_op_entry("colon", ":"),
 
-        #string_pair("comma", ","),
-        #string_pair("semicolon", ";"),
+        #make_op_entry("comma", ","),
+        #make_op_entry("semicolon", ";"),
 
-        #string_pair("parenthesis_left", "("),
-        #string_pair("parenthesis_right", ")"),
-        #string_pair("brace_left", "{"),
-        #string_pair("brace_right", "}"),
-        #string_pair("bracket_left", "["),
-        #string_pair("bracket_right", "]"),
+        #make_op_entry("parenthesis_left", "("),
+        #make_op_entry("parenthesis_right", ")"),
+        #make_op_entry("brace_left", "{"),
+        #make_op_entry("brace_right", "}"),
+        #make_op_entry("bracket_left", "["),
+        #make_op_entry("bracket_right", "]"),
 
-        #string_pair("hash", "#")
+        #make_op_entry("hash", "#")
     ];
 }
 
-macro token_kind_names() {
-    var names = Vector::empty<&[u8]>();
-
-    names.push("end_of_file");
-
-    names.push("comment");
-
-    names.push("identifier");
-
-    names.push("integer_literal");
-    names.push("float_literal");
-    names.push("string_literal");
-    names.push("char_literal");
-
-    for (#keyword_map()) |kw| {
-        var name = String::from("kw_");
-        name.append(kw);
-        names.push(name)
-    }
-
-    for (#operator_map()) |op| {
-        var name = String::from("op_");
-        name.append(op.first);
-        names.push(name)
-    }
-
-    return names;
+macro with_prefix(prefix: &[u8], word: &[u8]) -> &[u8] {
+    var name = String::from(prefix);
+    name.append(word);
+    return name;
 }
 
-macro token_kind_enum() {
+macro token_kind_enum() -> #Type {
     var t = #enum_type();
 
-    for (#token_kind_names()) |n| {
-        t.add_member(n.view(), #void);
+    for (#error_tokens()) |&et| {
+        t.add_member(et, #void);
+    }
+
+    for (#core_tokens()) |&ct| {
+        t.add_member(ct, #void);
+    }
+
+    for (#keywords()) |&kw| {
+        t.add_member(#with_prefix("kw_", kw).view(), #void);
+    }
+
+    for (#operators()) |&op| {
+        t.add_member(#with_prefix("op_", op.name).view(), #void);
     }
 
     return t;
@@ -133,6 +137,63 @@ macro token_kind_enum() {
 
 pub type TokenKind = #token_kind_enum();
 
-pub fn name(self tokenKind: &TokenKind) -> &[u8] {
-    return (#TokenKind.member_names())[tokenKind as u8];
+type TokenDescriptor = struct {
+    token: &[u8],
+    kind: TokenKind
+};
+
+macro token_descriptors() -> &[TokenDescriptor] {
+    var token_kind_index: u8 = 0;
+    var descriptors = Vector::empty<TokenDescriptor>();
+
+    for (#core_tokens()) {
+        descriptors.push(TokenDescriptor { .token = "", .kind = token_kind_index as TokenKind });
+        token_kind_index += 1;
+    }
+
+    for (#keywords()) |kw| {
+        descriptors.push(TokenDescriptor { .token = kw, .kind = token_kind_index as TokenKind });
+        token_kind_index += 1;
+    }
+
+    for (#operators()) |op| {
+        descriptors.push(TokenDescriptor { .token = op, .kind = token_kind_index as TokenKind });
+        token_kind_index += 1;
+    }
+
+    return descriptors.view();
+}
+
+pub fn keyword_token_kind(kw: &[u8]) -> Option<TokenKind> {
+    const token_descs = #token_descriptors();
+    const start_index = #error_tokens().length() + #core_tokens().length();
+    const end_index = start_index + #keywords().length();
+    const kw_token_descs = token_descs[start_index..end_index];
+
+    for (kw_token_descs) |desc| {
+        if (text_equals(&desc.token, &kw)) {
+            return ::Some(desc.kind);
+        }
+    }
+
+    return ::None;
+}
+
+pub fn operator_token_kind(op: &[u8]) -> Option<TokenKind> {
+    const token_descs = #token_descriptors();
+    const start_index = #error_tokens().length() + #core_tokens().length() + #keywords().length();
+    const end_index = start_index + #operators().length();
+    const op_token_descs = token_descs[start_index..end_index];
+
+    for (op_token_descs) |desc| {
+        if (text_equals(&desc.token, &op)) {
+            return ::Some(desc.kind);
+        }
+    }
+
+    return ::None;
+}
+
+pub fn name(self token_kind: &TokenKind) -> &[u8] {
+    return (#TokenKind.member_names())[token_kind as u8];
 }
