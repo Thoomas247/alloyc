@@ -8,7 +8,7 @@ type OperatorEntry = struct {
 };
 
 macro make_op_entry(name: &[u8], op: &[u8]) -> OperatorEntry {
-    return OperatorEntry { .name = name, .op = op };
+    return OperatorEntry { .name = &name, .op = &op };
 }
 
 macro error_tokens() -> &[&[u8]] {
@@ -107,9 +107,9 @@ macro operators() -> &[OperatorEntry] {
     ];
 }
 
-macro with_prefix(prefix: &[u8], word: &[u8]) -> &[u8] {
-    var name = String::from(prefix);
-    name.append(word);
+macro with_prefix(prefix: &[u8], word: &[u8]) -> String {
+    var name = String::from(&prefix);
+    name.append(&word);
     return name;
 }
 
@@ -125,11 +125,11 @@ macro token_kind_enum() -> #Type {
     }
 
     for (#keywords()) |&kw| {
-        t.add_member(#with_prefix("kw_", kw).view(), #void);
+        t.add_member(#with_prefix("kw_", &kw).view(), #void);
     }
 
     for (#operators()) |&op| {
-        t.add_member(#with_prefix("op_", op.name).view(), #void);
+        t.add_member(#with_prefix("op_", &op.name).view(), #void);
     }
 
     return t;
@@ -151,17 +151,17 @@ macro token_descriptors() -> &[TokenDescriptor] {
         token_kind_index += 1;
     }
 
-    for (#keywords()) |kw| {
-        descriptors.push(TokenDescriptor { .token = kw, .kind = token_kind_index as TokenKind });
+    for (#keywords()) |&kw| {
+        descriptors.push(TokenDescriptor { .token = &kw, .kind = token_kind_index as TokenKind });
         token_kind_index += 1;
     }
 
-    for (#operators()) |op| {
-        descriptors.push(TokenDescriptor { .token = op, .kind = token_kind_index as TokenKind });
+    for (#operators()) |&op| {
+        descriptors.push(TokenDescriptor { .token = &op.op, .kind = token_kind_index as TokenKind });
         token_kind_index += 1;
     }
 
-    return descriptors.view();
+    return &descriptors.view();
 }
 
 pub fn keyword_token_kind(kw: &[u8]) -> Option<TokenKind> {

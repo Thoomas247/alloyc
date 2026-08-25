@@ -10,14 +10,9 @@ fn main() {
 }
 
 fn compile_module(path: &[u8]) {
-    const src = match (read_file(&path)) {
-        Option::Some |&src| {
-            yield src;
-        }
-        else {
-            print_error_line("Failed to read file.");
-            return;
-        }
+    const src = if (read_file(&path) is ::Some |move src|) move src else {
+        print_error_line("Failed to read file.");
+        return;
     };
 
     const tokens = tokenize(&src);

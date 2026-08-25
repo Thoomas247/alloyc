@@ -23,6 +23,7 @@ pub fn tokenize(src: &[u8]) -> Vector<Token> {
         while (skip_whitespace(&state) || skip_comments(&state)) {}
 
         tokenize_identifier(&state);
+        tokenize_operator(&state);
     }
 
     state.tokens.push(Token { .kind = ::end_of_file, .view = "" });
@@ -123,11 +124,7 @@ fn tokenize_identifier(state: &var TokenizerState) -> bool {
     const end_index = state.cursor.index;
     const token_view = state.cursor.src[start_index..end_index];
 
-    const token_kind = if (keyword_token_kind(&token_view) is ::Some |token_kind|) {
-        yield token_kind;
-    } else {
-        yield ::identifier;
-    };
+    const token_kind = if (keyword_token_kind(&token_view) is ::Some |&token_kind|) token_kind else ::identifier;
 
     state.tokens.push(Token { .kind = token_kind, .view = &token_view });
 
@@ -147,10 +144,10 @@ fn tokenize_operator(state: &var TokenizerState) -> bool {
     const end_index = state.cursor.index;
     const token_view = state.cursor.src[start_index..end_index];
 
-    if (operator_token_kind() is ::Some |tooken_kind|) {
+    if (operator_token_kind(&token_view) is ::Some |&token_kind|) {
         state.tokens.push(Token { .kind = token_kind, .view = &token_view });
     } else {
-        state.tokens.push(Token { .kind = ::error_invalid_operator, .view = token_view });
+        state.tokens.push(Token { .kind = ::error_invalid_operator, .view = &token_view });
     }
 
     return true;
