@@ -20,10 +20,18 @@ pub fn tokenize(src: &[u8]) -> Vector<Token> {
     };
 
     while (state.cursor.has_next()) {
-        while (skip_whitespace(&state) || skip_comments(&state)) {}
 
-        tokenize_identifier(&state);
-        tokenize_operator(&state);
+        if (skip_whitespace(&state)
+                || tokenize_comment(&state)
+                || tokenize_identifier(&state)
+                || tokenize_operator(&state)) {
+            continue;
+        }
+
+        const start_index = state.cursor.index;
+        state.cursor.next();
+        const token_view = state.cursor.src[start_index..state.cursor.index];
+        state.tokens.push(Token { .kind = ::error_invalid_operator, .view = &token_view });
     }
 
     state.tokens.push(Token { .kind = ::end_of_file, .view = "" });
@@ -70,7 +78,7 @@ fn skip_whitespace(state: &var TokenizerState) -> bool {
     return skipped;
 }
 
-fn skip_comments(state: &var TokenizerState) -> bool {
+fn tokenize_comment(state: &var TokenizerState) -> bool {
     if (state.cursor.peek() is ::Some |&first| && first == '/' && state.cursor.peek(1) is ::Some |&second|) {
         match (second) {
             '/' {
@@ -81,6 +89,8 @@ fn skip_comments(state: &var TokenizerState) -> bool {
                 while (state.cursor.peek() is ::Some |&c| && c != '\n') {
                     state.cursor.next();
                 }
+
+                state.tokens.push(Token { .kind = ::comment, .view = &token_view });
 
                 return true;
             }
@@ -136,19 +146,28 @@ fn tokenize_operator(state: &var TokenizerState) -> bool {
         return false;
     }
 
+    const remaining = state.cursor.src.length() - state.cursor.index;
+
+    const max_operator_length: u64 = 3;
+    var len = if (max_operator_length < remaining) max_operator_length else remaining;
+    while (len > 0) {
+        const end_index = state.cursor.index + len;
+        const candidate = state.cursor.src[state.cursor.index..end_index];
+
+        if (operator_token_kind(&candidate) is ::Some |&token_kind|) {
+            state.tokens.push(Token { .kind = token_kind, .view = &candidate });
+            state.cursor.index = end_index;
+            return true;
+        }
+
+        len -= 1;
+    }
+
+    // No known operator/punctuation matched; consume one character as an error token.
     const start_index = state.cursor.index;
-    while (state.cursor.peek() is ::Some |c| && is_operator_legal(c)) {
-        state.cursor.next();
-    }
-
-    const end_index = state.cursor.index;
-    const token_view = state.cursor.src[start_index..end_index];
-
-    if (operator_token_kind(&token_view) is ::Some |&token_kind|) {
-        state.tokens.push(Token { .kind = token_kind, .view = &token_view });
-    } else {
-        state.tokens.push(Token { .kind = ::error_invalid_operator, .view = &token_view });
-    }
+    state.cursor.next();
+    const token_view = state.cursor.src[start_index..state.cursor.index];
+    state.tokens.push(Token { .kind = ::error_invalid_operator, .view = &token_view });
 
     return true;
 }

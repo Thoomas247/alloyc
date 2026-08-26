@@ -146,6 +146,11 @@ macro token_descriptors() -> &[TokenDescriptor] {
     var token_kind_index: u8 = 0;
     var descriptors = Vector::empty<TokenDescriptor>();
 
+    for (#error_tokens()) |&et| {
+        descriptors.push(TokenDescriptor { .token = "", .kind = token_kind_index as TokenKind });
+        token_kind_index += 1;
+    }
+
     for (#core_tokens()) {
         descriptors.push(TokenDescriptor { .token = "", .kind = token_kind_index as TokenKind });
         token_kind_index += 1;
@@ -168,9 +173,9 @@ pub fn keyword_token_kind(kw: &[u8]) -> Option<TokenKind> {
     const token_descs = #token_descriptors();
     const start_index = #error_tokens().length() + #core_tokens().length();
     const end_index = start_index + #keywords().length();
-    const kw_token_descs = token_descs[start_index..end_index];
+    const kw_token_descs = #token_descs[start_index..end_index];
 
-    for (kw_token_descs) |desc| {
+    for (kw_token_descs) |&desc| {
         if (text_equals(&desc.token, &kw)) {
             return ::Some(desc.kind);
         }
@@ -183,9 +188,9 @@ pub fn operator_token_kind(op: &[u8]) -> Option<TokenKind> {
     const token_descs = #token_descriptors();
     const start_index = #error_tokens().length() + #core_tokens().length() + #keywords().length();
     const end_index = start_index + #operators().length();
-    const op_token_descs = token_descs[start_index..end_index];
+    const op_token_descs = #token_descs[start_index..end_index];
 
-    for (op_token_descs) |desc| {
+    for (op_token_descs) |&desc| {
         if (text_equals(&desc.token, &op)) {
             return ::Some(desc.kind);
         }

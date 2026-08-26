@@ -14,7 +14,7 @@ fn compile_module(path: &[u8]) {
         print_error_line("Failed to read file.");
         return;
     };
-
+    
     const tokens = tokenize(&src);
     tokens.debug_print();
 }

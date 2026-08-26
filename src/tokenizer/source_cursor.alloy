@@ -17,7 +17,7 @@ pub fn next(self cursor: &var SourceCursor) -> Option<u8> {
 
 // Returns true if there are more characters to read, false otherwise.
 pub fn has_next(self cursor: &SourceCursor) -> bool {
-    return (cursor.index + 1) < cursor.src.length();
+    return cursor.index < cursor.src.length();
 }
 
 // Returns the current character without moving the cursor.
