@@ -5,16 +5,22 @@ pub type Token = struct {
     view: &[u8]
 };
 
-pub fn to_string(self token: &Token) -> &[u8] {
+pub fn to_string(self token: &Token) -> String {
     const kind_name = &token.kind.name();
     const separator = " - ";
     const value = &token.view;
 
     var str = String::with_capacity(kind_name.length() + separator.length() + value.length());
 
+    if (token.kind.is_error()) {
+        str.append("\x1b[31m"); // color error tokens red
+    }
+
     str.append(&kind_name);
     str.append(&separator);
     str.append(&value);
 
-    return &str.view();
+    str.append("\x1b[0m"); // reset color
+
+    return str;
 }

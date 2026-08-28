@@ -12,7 +12,14 @@ macro make_op_entry(name: &[u8], op: &[u8]) -> OperatorEntry {
 }
 
 macro error_tokens() -> &[&[u8]] {
-    return ["error_invalid_operator"];
+    return [
+        "error_invalid_character",
+        "error_invalid_operator",
+        "error_invalid_comment",
+        "error_invalid_number_literal",
+        "error_invalid_string_literal",
+        "error_invalid_char_literal"
+    ];
 }
 
 macro core_tokens() -> &[&[u8]] {
@@ -32,7 +39,7 @@ macro keywords() -> &[&[u8]] {
         "type", "enum", "struct",
         "const", "var",
         "if", "else", "while", "for", "match",
-        "break", "yield", "return",
+        "break", "continue", "yield", "return",
         "new", "move",
         "self",
         "pub", "exp",
@@ -200,5 +207,9 @@ pub fn operator_token_kind(op: &[u8]) -> Option<TokenKind> {
 }
 
 pub fn name(self token_kind: &TokenKind) -> &[u8] {
-    return (#TokenKind.member_names())[token_kind as u8];
+    return (#TokenKind.member_names())[token_kind to u8];
+}
+
+pub fn is_error(self token_kind: &TokenKind) -> bool {
+    return (token_kind to u8) < #error_tokens().length();
 }
