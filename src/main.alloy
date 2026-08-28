@@ -4,7 +4,7 @@ import std::process;
 import tokenizer::tokenizer;
 
 fn main() {
-    const entry_path = "spec/samples/run_demo.alloy";
+    const entry_path = "tests/tokenizer_test.alloy";
 
     compile_module(&entry_path);
 }
