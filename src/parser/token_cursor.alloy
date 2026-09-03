@@ -1,0 +1,47 @@
+import std::option;
+
+import tokenizer::token;
+
+pub type TokenCursor = struct {
+    tokens: &[Token],
+    index: u64
+};
+
+pub fn TokenCursor::create(tokens: &[Token]) -> TokenCursor {
+    return TokenCursor {
+        .tokens = &tokens,
+        .index = 0
+    };
+}
+
+// Returns the current token and moves the cursor forward, or ::None if past the end.
+pub fn next(self cursor: &var TokenCursor) -> Option<&Token> {
+    if (cursor.index >= cursor.tokens.length()) {
+        return ::None;
+    }
+
+    cursor.index += 1;
+    return ::Some(&cursor.tokens[cursor.index - 1]);
+}
+
+// Returns true if there are more tokens to read, false otherwise.
+pub fn has_next(self cursor: &TokenCursor) -> bool {
+    return cursor.index < cursor.tokens.length();
+}
+
+// Returns the current token without moving the cursor.
+pub fn peek(self cursor: &TokenCursor) -> Option<&Token> {
+    return cursor.peek(0);
+}
+
+// Returns the token `offset` positions ahead.
+// Set offset to 0 for current token.
+pub fn peek(self cursor: &TokenCursor, offset: u64) -> Option<&Token> {
+    const index = cursor.index + offset;
+
+    if (index >= cursor.tokens.length()) {
+        return ::None;
+    }
+
+    return ::Some(&cursor.tokens[index]);
+}

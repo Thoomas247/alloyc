@@ -1,0 +1,442 @@
+import std::option;
+
+import tokenizer::token;
+
+// --- Top level ---
+
+pub type Module = struct {
+    imports: &[ImportDecl],
+    definitions: &[Definition]
+};
+
+pub type ImportDecl = struct {
+    path: &[&[u8]],
+    alias: Option<&[u8]>
+};
+
+pub type Visibility = enum { Private, Pub, Exp };
+
+pub type DefinitionKind = enum {
+    TypeDef: &TypeDef,
+    FnDef: &FnDef,
+    ExternDef: &ExternDef,
+    InterfaceDef: &InterfaceDef,
+    MacroDef: &MacroDef
+};
+
+pub type Definition = struct {
+    visibility: Visibility,
+    kind: DefinitionKind
+};
+
+pub type TypeDef = struct {
+    name: &[u8],
+    type_params: &[TypeParam],
+    markers: &[InterfaceMarker],
+    value: &Type
+};
+
+pub type InterfaceDef = struct {
+    name: &[u8],
+    type_params: &[TypeParam],
+    functions: &[InterfaceFn]
+};
+
+pub type InterfaceFn = struct {
+    name: &[u8],
+    receiver: Receiver,
+    params: &[Param],
+    return_type: Option<&Type>
+};
+
+pub type Receiver = enum { Ref, RefVar, Ptr, PtrVar };
+
+pub type InterfaceMarker = struct {
+    path: &[&[u8]],
+    type_args: &[Type]
+};
+
+pub type FnDef = struct {
+    qualifier: Option<&[u8]>,
+    name: &[u8],
+    type_params: &[TypeParam],
+    function: &Function
+};
+
+pub type MacroDef = struct {
+    name: &[u8],
+    params: &[MacroParam],
+    return_type: &Type,
+    body: Option<&StmtBlock>
+};
+
+pub type MacroParam = struct {
+    name: &[u8],
+    type_annotation: Option<&Type>
+};
+
+pub type ExternDef = struct {
+    name: &[u8],
+    params: ExternParams,
+    return_type: Option<&Type>
+};
+
+// Collapses the three "empty / params[, ...] / bare ..." grammar
+// alternatives into the two shapes that actually matter downstream.
+pub type ExternParams = enum {
+    Fixed: &[Param],
+    Variadic: &[Param]
+};
+
+pub type TypeParam = struct {
+    name: &[u8],
+    constraint: Option<&InterfaceMarker>
+};
+
+// --- Functions ---
+
+pub type Function = struct {
+    params: &[Param],
+    return_type: Option<&Type>,
+    body: &StmtBlock
+};
+
+pub type Param = struct {
+    is_self: bool,
+    name: &[u8],
+    type_annotation: &Type
+};
+
+// --- Types ---
+
+pub type TypeModifier = enum { None, Ptr, PtrVar, Ref, RefVar };
+
+pub type TypeBase = enum {
+    Base: BaseType,
+    Nested: &Type
+};
+
+pub type Type = struct {
+    modifier: TypeModifier,
+    base: TypeBase
+};
+
+pub type BaseType = enum {
+    NamedType: &NamedType,
+    StructType: &StructType,
+    EnumType: &EnumType,
+    ArrayType: &ArrayType,
+    FnType: &FnType,
+    ComptimeTypeDescriptor,
+    ComptimeExpr: &ComptimeExpr
+};
+
+pub type NamedType = struct {
+    path: &[&[u8]],
+    type_args: &[Type]
+};
+
+pub type StructType = struct {
+    members: &[StructMember]
+};
+
+pub type StructMember = struct {
+    name: &[u8],
+    type_annotation: &Type
+};
+
+pub type EnumType = struct {
+    members: &[EnumMember]
+};
+
+pub type EnumMember = struct {
+    name: &[u8],
+    payload_type: Option<&Type>
+};
+
+pub type ArrayType = struct {
+    element_type: &Type,
+    size: Option<&Expression>
+};
+
+pub type FnType = struct {
+    param_types: &[Type],
+    return_type: Option<&Type>
+};
+
+// --- Statements ---
+
+pub type Statement = enum {
+    VarDef: &VarDef,
+    StmtBlock: &StmtBlock,
+    IfExpr: &IfExpr,
+    ForExpr: &ForExpr,
+    WhileExpr: &WhileExpr,
+    MatchExpr: &MatchExpr,
+    BreakStmt: &BreakStmt,
+    ContinueStmt: &ContinueStmt,
+    YieldStmt: &YieldStmt,
+    ReturnStmt: &ReturnStmt,
+    ExprStmt: &ExprStmt
+};
+
+pub type Mutability = enum { Var, Const };
+
+pub type VarDef = struct {
+    mutability: Mutability,
+    name: &[u8],
+    type_annotation: Option<&Type>,
+    value: &Expression
+};
+
+pub type StmtBlock = struct {
+    statements: &[Statement]
+};
+
+pub type BreakStmt = struct {
+    value: Option<&Expression>
+};
+
+pub type ContinueStmt = struct {};
+
+pub type YieldStmt = struct {
+    value: &Expression
+};
+
+pub type ReturnStmt = struct {
+    value: Option<&Expression>
+};
+
+pub type ExprStmt = struct {
+    expr: &Expression,
+    assignment: Option<&Assignment>
+};
+
+pub type AssignOp = enum {
+    Assign, AddAssign, SubAssign, MulAssign, DivAssign, ModAssign,
+    ShlAssign, ShrAssign, AndAssign, OrAssign, XorAssign
+};
+
+pub type Assignment = struct {
+    op: AssignOp,
+    value: &Expression
+};
+
+// --- Expressions ---
+
+pub type BinaryOp = enum {
+    Add, Sub, Mul, Div, Mod,
+    Eq, Ne, Lt, Le, Gt, Ge,
+    LogicalAnd, LogicalOr,
+    BitAnd, BitOr, BitXor, Shl, Shr
+};
+
+pub type BinaryOperand = struct {
+    op: BinaryOp,
+    rhs: &CastExpr
+};
+
+pub type Expression = struct {
+    first: &CastExpr,
+    rest: &[BinaryOperand]
+};
+
+pub type IsTarget = enum {
+    ImpliedVariant: &ImpliedVariant,
+    NamedType: &NamedType
+};
+
+pub type IsClause = struct {
+    target: IsTarget,
+    capture: Option<&Capture>
+};
+
+pub type CastSuffix = enum {
+    Is: &IsClause,
+    As: &Type,
+    To: &Type
+};
+
+pub type CastExpr = struct {
+    operand: UnaryExpr,
+    suffixes: &[CastSuffix]
+};
+
+pub type UnaryOp = enum { Neg, BitNot, Not, Ref, RefVar, New, Move };
+
+pub type UnaryExpr = enum {
+    Unary: &UnaryOperation,
+    Postfix: &PostfixExpr
+};
+
+pub type UnaryOperation = struct {
+    op: UnaryOp,
+    operand: UnaryExpr
+};
+
+pub type PostfixExpr = struct {
+    primary: PrimaryExpr,
+    suffixes: &[PostfixSuffix]
+};
+
+pub type PostfixSuffix = enum {
+    Call: &CallSuffix,
+    GenericCall: &GenericCallSuffix,
+    Member: &MemberAccessSuffix,
+    Index: &IndexSuffix,
+    Subslice: &SubsliceSuffix
+};
+
+pub type CallSuffix = struct {
+    arguments: &[Expression]
+};
+
+pub type GenericCallSuffix = struct {
+    type_args: &[Type],
+    arguments: &[Expression]
+};
+
+pub type MemberAccessSuffix = struct {
+    name: &[u8]
+};
+
+pub type IndexSuffix = struct {
+    index: &Expression
+};
+
+pub type SubsliceSuffix = struct {
+    start: Option<&Expression>,
+    end: &Expression
+};
+
+pub type PrimaryExpr = enum {
+    Literal: Literal,
+    IdentifierExpr: &IdentifierExpr,
+    ImpliedVariant: &ImpliedVariant,
+    NamedStructInit: &NamedStructInit,
+    AnonStructInit: &AnonStructInit,
+    Parenthesized: &Expression,
+    ArrayFill: &ArrayFill,
+    ArrayRange: &ArrayRange,
+    ArrayLiteral: &ArrayLiteral,
+    IfExpr: &IfExpr,
+    ForExpr: &ForExpr,
+    WhileExpr: &WhileExpr,
+    MatchExpr: &MatchExpr,
+    LambdaExpr: &LambdaExpr,
+    ComptimeExpr: &ComptimeExpr
+};
+
+pub type IdentifierExpr = struct {
+    path: &[&[u8]]
+};
+
+pub type ImpliedVariant = struct {
+    name: &[u8]
+};
+
+pub type Literal = enum {
+    Integer: &Token,
+    Float: &Token,
+    String: &Token,
+    Char: &Token,
+    True: &Token,
+    False: &Token
+};
+
+pub type ArrayLiteral = struct {
+    elements: &[Expression]
+};
+
+pub type ArrayFill = struct {
+    value: &Expression,
+    count: &Expression
+};
+
+pub type ArrayRange = struct {
+    start: Option<&Expression>,
+    end: &Expression
+};
+
+pub type NamedStructInit = struct {
+    path: &[&[u8]],
+    type_args: &[Type],
+    members: &[MemberInit]
+};
+
+pub type AnonStructInit = struct {
+    members: &[MemberInit]
+};
+
+pub type MemberInit = struct {
+    name: &[u8],
+    value: &Expression
+};
+
+pub type LambdaExpr = struct {
+    captures: &[Capture],
+    function: &Function
+};
+
+pub type CaptureMode = enum { Value, Ref, RefVar, Move };
+
+pub type Capture = struct {
+    mode: CaptureMode,
+    name: &[u8]
+};
+
+pub type IfExpr = struct {
+    condition: &Expression,
+    then_branch: IfBranch,
+    else_branch: Option<IfBranch>
+};
+
+pub type IfBranch = enum {
+    StmtBlock: &StmtBlock,
+    Expression: &Expression
+};
+
+pub type ForExpr = struct {
+    subjects: &[Expression],
+    captures: &[Capture],
+    body: &StmtBlock,
+    else_block: Option<&StmtBlock>
+};
+
+pub type WhileExpr = struct {
+    condition: &Expression,
+    body: &StmtBlock,
+    else_block: Option<&StmtBlock>
+};
+
+pub type MatchExpr = struct {
+    subject: &Expression,
+    arms: &[MatchArmEntry],
+    else_block: Option<&StmtBlock>
+};
+
+pub type MatchPattern = enum {
+    Expression: &Expression,
+    Else
+};
+
+pub type MatchArmBody = enum {
+    StmtBlock: &StmtBlock,
+    Expression: &Expression
+};
+
+pub type MatchArmEntry = struct {
+    pattern: MatchPattern,
+    capture: Option<&Capture>,
+    body: MatchArmBody
+};
+
+pub type ComptimeTarget = enum {
+    PostfixExpr: &PostfixExpr,
+    StructType: &StructType,
+    EnumType: &EnumType
+};
+
+pub type ComptimeExpr = struct {
+    target: ComptimeTarget
+};

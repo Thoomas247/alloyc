@@ -1,9 +1,16 @@
-import std::iterable;
+import std::option;
 
 pub type SourceCursor = struct {
     src: &[u8],
     index: u64
 };
+
+pub fn SourceCursor::create(src: &[u8]) -> SourceCursor {
+    return SourceCursor {
+        .src = &src,
+        .index = 0
+    };
+}
 
 // Returns the current character and moves the cursor forward, or ::None if past the end.
 pub fn next(self cursor: &var SourceCursor) -> Option<u8> {

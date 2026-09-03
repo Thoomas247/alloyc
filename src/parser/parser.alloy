@@ -1,0 +1,48 @@
+import std::option;
+import std::vector;
+
+import tokenizer::token;
+import tokenizer::token_kind;
+import token_cursor;
+import ast;
+import node_allocator;
+import parser_state;
+
+type Result<T> = enum {
+    Error: &[u8],
+    Success: T
+};
+
+pub fn parse(tokens: &Vector<Token>, allocator: &var NodeAllocator) -> &Module {
+    var state = ParserState {
+        .cursor = TokenCursor::create(&tokens.view()),
+        .alloc = &var allocator
+    };
+
+    return &state.parse_module();
+}
+
+fn parse_module(self state: &var ParserState) -> &Module {
+    var imports = Vector::empty<ImportDecl>();
+    while (state.peek() is ::Some |&token| && token.kind is TokenKind::kw_import) {
+        imports.push(state.parse_import_decl());
+    }
+
+    var definitions = Vector::empty<Definition>();
+    while (state.has_next()) {
+        definitions.push(state.parse_definition());
+    }
+
+    return &state.alloc(Module {
+            .imports = &state.alloc_array(&imports.view()),
+            .definitions = &state.alloc_array(&definitions.view())
+        });
+}
+
+fn parse_import_decl(self state: &var ParserState) -> ImportDecl {
+    panic;
+}
+
+fn parse_definition(self state: &var ParserState) -> Definition {
+    panic;
+}

@@ -1,0 +1,43 @@
+import std::option;
+
+import tokenizer::token;
+import token_cursor;
+import node_allocator;
+
+pub type ParserState = struct {
+    cursor: TokenCursor,
+    alloc: &var NodeAllocator
+};
+
+pub fn peek(self state: &ParserState) -> Option<&Token> {
+    return state.cursor.peek();
+}
+
+pub fn peek(self state: &ParserState, offset: u64) -> Option<&Token> {
+    return state.cursor.peek(offset);
+}
+
+pub fn has_next(self state: &ParserState) -> bool {
+    return state.cursor.has_next();
+}
+
+pub fn next(self state: &var ParserState) -> Option<&Token> {
+    return state.cursor.next();
+}
+
+pub fn alloc<T>(self state: &var ParserState, value: T) -> &var T {
+    return &var state.alloc.alloc(value);
+}
+
+pub fn alloc_array<T>(self state: &var ParserState, items: &[T]) -> &var [T] {
+    return &var state.alloc.alloc_array(&items);
+}
+
+// Consumes the current token, which must be an identifier, and returns its text.
+pub fn expect_identifier(self state: &var ParserState) -> &[u8] {
+    if (state.next() is ::Some |&token| && token.kind is TokenKind::identifier) {
+        return &token.view;
+    }
+
+    panic;
+}

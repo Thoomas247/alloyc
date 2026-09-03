@@ -45,7 +45,8 @@ macro keywords() -> &[&[u8]] {
         "pub", "exp",
         "true", "false",
         "interface",
-        "as", "is", "to"
+        "as", "is", "to",
+        "panic"
     ];
 }
 

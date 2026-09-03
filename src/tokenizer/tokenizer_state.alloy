@@ -1,0 +1,30 @@
+import std::option;
+import std::vector;
+
+import token;
+import source_cursor;
+
+pub type TokenizerState = struct {
+    cursor: SourceCursor,
+    tokens: Vector<Token>
+};
+
+pub fn peek(self state: &TokenizerState) -> Option<u8> {
+    return state.cursor.peek();
+}
+
+pub fn peek(self state: &TokenizerState, offset: u64) -> Option<u8> {
+    return state.cursor.peek(offset);
+}
+
+pub fn has_next(self state: &TokenizerState) -> bool {
+    return state.cursor.has_next();
+}
+
+pub fn next(self state: &var TokenizerState) -> Option<u8> {
+    return state.cursor.next();
+}
+
+pub fn push(self state: &var TokenizerState, token: Token) {
+    state.tokens.push(token);
+}

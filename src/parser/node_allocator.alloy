@@ -1,0 +1,70 @@
+import std::option;
+import std::vector;
+
+pub type NodeAllocator = struct {
+    page_size: u64,
+    current_page: Option<*var [u8]>,
+    used: u64,
+    full_pages: Vector<*var [u8]>
+};
+
+pub fn NodeAllocator::empty(page_size: u64) -> NodeAllocator {
+    return NodeAllocator {
+        .page_size = page_size,
+        .current_page = ::None,
+        .used = page_size,
+        .full_pages = Vector::empty()
+    };
+}
+
+fn align_up(offset: u64, alignment: u64) -> u64 {
+    return (offset + alignment - 1) & ~(alignment - 1);
+}
+
+// Reserves 'size' aligned bytes, rolling to a new page first if the current
+// one can't fit them, and returns the offset into 'current_page' to write at.
+fn reserve(self allocator: &var NodeAllocator, size: u64, alignment: u64) -> u64 {
+    const offset = align_up(allocator.used, alignment);
+    if (offset + size > allocator.page_size) {
+        if (allocator.current_page is ::Some |move old_page|) {
+            allocator.full_pages.push(move old_page);
+        }
+        allocator.current_page = ::Some(new [0 : allocator.page_size]);
+        allocator.used = size;
+        return 0;
+    }
+
+    allocator.used = offset + size;
+    return offset;
+}
+
+// Moves 'value' into the arena and returns a stable reference to the new value.
+pub fn alloc<T>(self allocator: &var NodeAllocator, value: T) -> &var T {
+    const size = #T.size();
+    const offset = allocator.reserve(size, #T.alignment());
+
+    if (allocator.current_page is ::Some |&var page|) {
+        var slot = &var page[offset..offset + size] as &var [T];
+        slot[0] = move value;
+        return &var slot[0];
+    }
+
+    panic;
+}
+
+// Copies every element of 'items' into one contiguous arena region and returns a stable view of the copy.
+pub fn alloc_array<T>(self allocator: &var NodeAllocator, items: &[T]) -> &var [T] {
+    const count = items.length();
+    const size = #T.size() * count;
+    const offset = allocator.reserve(size, #T.alignment());
+
+    if (allocator.current_page is ::Some |&var page|) {
+        var slot = &var page[offset..offset + size] as &var [T];
+        for ([..count]) |index| {
+            slot[index] = items[index];
+        }
+        return &var slot;
+    }
+
+    panic;
+}
