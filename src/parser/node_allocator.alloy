@@ -21,8 +21,7 @@ fn align_up(offset: u64, alignment: u64) -> u64 {
     return (offset + alignment - 1) & ~(alignment - 1);
 }
 
-// Reserves 'size' aligned bytes, rolling to a new page first if the current
-// one can't fit them, and returns the offset into 'current_page' to write at.
+// Reserves 'size' aligned bytes in the current page, rolling to a new one if needed.
 fn reserve(self allocator: &var NodeAllocator, size: u64, alignment: u64) -> u64 {
     const offset = align_up(allocator.used, alignment);
     if (offset + size > allocator.page_size) {
@@ -38,7 +37,7 @@ fn reserve(self allocator: &var NodeAllocator, size: u64, alignment: u64) -> u64
     return offset;
 }
 
-// Moves 'value' into the arena and returns a stable reference to the new value.
+// Arena-copies 'value', use for a node's single-reference fields.
 pub fn alloc<T>(self allocator: &var NodeAllocator, value: T) -> &var T {
     const size = #T.size();
     const offset = allocator.reserve(size, #T.alignment());
@@ -52,9 +51,13 @@ pub fn alloc<T>(self allocator: &var NodeAllocator, value: T) -> &var T {
     panic;
 }
 
-// Copies every element of 'items' into one contiguous arena region and returns a stable view of the copy.
+// Arena-copies 'items' as one contiguous slice, use for a node's array fields.
 pub fn alloc_array<T>(self allocator: &var NodeAllocator, items: &[T]) -> &var [T] {
     const count = items.length();
+    if (count == 0) {
+        return [];
+    }
+
     const size = #T.size() * count;
     const offset = allocator.reserve(size, #T.alignment());
 

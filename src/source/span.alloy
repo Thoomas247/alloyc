@@ -1,0 +1,14 @@
+pub type Span = struct {
+    start: u64,
+    end: u64
+};
+
+// An empty span at a single byte offset, used when nothing was there to point at.
+pub fn Span::empty(at: u64) -> Span {
+    return Span { .start = at, .end = at };
+}
+
+// The span covering both 'a' and 'b': starts at 'a', ends at 'b'.
+pub fn join(self a: &Span, b: &Span) -> Span {
+    return Span { .start = a.start, .end = b.end };
+}

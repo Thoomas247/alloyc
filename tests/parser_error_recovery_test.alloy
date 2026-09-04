@@ -1,0 +1,16 @@
+// leading comment before any import
+import std::io;
+
+import ; // missing path
+
+import a::; // missing identifier after '::'
+
+/* a block comment
+   between imports */
+import b as; // missing identifier after 'as'
+
+import c // missing terminating ';'
+import std::vector;
+
+"unterminated
+import std::option;

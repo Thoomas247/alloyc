@@ -11,17 +11,6 @@ macro make_op_entry(name: &[u8], op: &[u8]) -> OperatorEntry {
     return OperatorEntry { .name = &name, .op = &op };
 }
 
-macro error_tokens() -> &[&[u8]] {
-    return [
-        "error_invalid_character",
-        "error_invalid_operator",
-        "error_invalid_comment",
-        "error_invalid_number_literal",
-        "error_invalid_string_literal",
-        "error_invalid_char_literal"
-    ];
-}
-
 macro core_tokens() -> &[&[u8]] {
     return [
         "end_of_file",
@@ -124,10 +113,6 @@ macro with_prefix(prefix: &[u8], word: &[u8]) -> String {
 macro token_kind_enum() -> #Type {
     var t = #enum_type();
 
-    for (#error_tokens()) |&et| {
-        t.add_member(et, #void);
-    }
-
     for (#core_tokens()) |&ct| {
         t.add_member(ct, #void);
     }
@@ -154,11 +139,6 @@ macro token_descriptors() -> &[TokenDescriptor] {
     var token_kind_index: u8 = 0;
     var descriptors = Vector::empty<TokenDescriptor>();
 
-    for (#error_tokens()) |&et| {
-        descriptors.push(TokenDescriptor { .token = "", .kind = token_kind_index as TokenKind });
-        token_kind_index += 1;
-    }
-
     for (#core_tokens()) {
         descriptors.push(TokenDescriptor { .token = "", .kind = token_kind_index as TokenKind });
         token_kind_index += 1;
@@ -179,7 +159,7 @@ macro token_descriptors() -> &[TokenDescriptor] {
 
 pub fn keyword_token_kind(kw: &[u8]) -> Option<TokenKind> {
     const token_descs = #token_descriptors();
-    const start_index = #error_tokens().length() + #core_tokens().length();
+    const start_index = #core_tokens().length();
     const end_index = start_index + #keywords().length();
     const kw_token_descs = #token_descs[start_index..end_index];
 
@@ -194,7 +174,7 @@ pub fn keyword_token_kind(kw: &[u8]) -> Option<TokenKind> {
 
 pub fn operator_token_kind(op: &[u8]) -> Option<TokenKind> {
     const token_descs = #token_descriptors();
-    const start_index = #error_tokens().length() + #core_tokens().length() + #keywords().length();
+    const start_index = #core_tokens().length() + #keywords().length();
     const end_index = start_index + #operators().length();
     const op_token_descs = #token_descs[start_index..end_index];
 
@@ -209,8 +189,4 @@ pub fn operator_token_kind(op: &[u8]) -> Option<TokenKind> {
 
 pub fn name(self token_kind: &TokenKind) -> &[u8] {
     return (#TokenKind.member_names())[token_kind to u8];
-}
-
-pub fn is_error(self token_kind: &TokenKind) -> bool {
-    return (token_kind to u8) < #error_tokens().length();
 }

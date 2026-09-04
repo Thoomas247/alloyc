@@ -1,27 +1,21 @@
 import token_kind;
+import source::span;
 
 pub type Token = struct {
     kind: TokenKind,
-    start: u64,
-    end: u64
+    span: Span
 };
 
 pub fn to_string(self token: &Token, src: &[u8]) -> String {
     const kind_name = &token.kind.name();
     const separator = " - ";
-    const value = &src[token.start..token.end];
+    const value = &src[token.span.start..token.span.end];
 
     var str = String::with_capacity(kind_name.length() + separator.length() + value.length());
-
-    if (token.kind.is_error()) {
-        str.append("\x1b[31m"); // color error tokens red
-    }
 
     str.append(&kind_name);
     str.append(&separator);
     str.append(&value);
-
-    str.append("\x1b[0m"); // reset color
 
     return str;
 }

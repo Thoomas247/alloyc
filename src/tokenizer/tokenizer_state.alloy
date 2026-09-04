@@ -3,10 +3,13 @@ import std::vector;
 
 import token;
 import source_cursor;
+import source::span;
+import diagnostics::diagnostics;
 
 pub type TokenizerState = struct {
     cursor: SourceCursor,
-    tokens: Vector<Token>
+    tokens: Vector<Token>,
+    diagnostics: &var Diagnostics
 };
 
 // Returns the current character without moving the cursor.
@@ -32,4 +35,9 @@ pub fn next(self state: &var TokenizerState) -> Option<u8> {
 // Appends a token to the tokenizer's output.
 pub fn push(self state: &var TokenizerState, token: Token) {
     state.tokens.push(token);
+}
+
+// Records a lexical error at the given span.
+pub fn error(self state: &var TokenizerState, span: Span, message: &[u8]) {
+    state.diagnostics.error(span, &message);
 }

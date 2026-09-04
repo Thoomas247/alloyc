@@ -7,16 +7,19 @@ import token_cursor;
 import ast;
 import node_allocator;
 import parser_state;
+import source::span;
+import diagnostics::diagnostics;
 
 type Result<T> = enum {
     Error: &[u8],
     Success: T
 };
 
-pub fn parse(tokens: &Vector<Token>, src: &[u8], allocator: &var NodeAllocator) -> &Module {
+pub fn parse(tokens: &Vector<Token>, src: &[u8], diagnostics: &var Diagnostics, allocator: &var NodeAllocator) -> &Module {
     var state = ParserState {
         .cursor = TokenCursor::create(&tokens.view()),
         .alloc = &var allocator,
+        .diagnostics = &var diagnostics,
         .src = &src
     };
 
@@ -24,24 +27,108 @@ pub fn parse(tokens: &Vector<Token>, src: &[u8], allocator: &var NodeAllocator) 
 }
 
 fn parse_module(self state: &var ParserState) -> &Module {
+    const start = state.current_span().start;
+
     var imports = Vector::empty<ImportDecl>();
     while (state.peek() is ::Some |&token| && token.kind is TokenKind::kw_import) {
+        const before = state.cursor.index;
         imports.push(state.parse_import_decl());
+        if (state.cursor.index == before) {
+            state.error(state.current_span(), "unexpected token");
+            state.next();
+        }
     }
 
     var definitions = Vector::empty<Definition>();
     while (state.has_next()) {
+        const before = state.cursor.index;
         definitions.push(state.parse_definition());
+        if (state.cursor.index == before) {
+            state.error(state.current_span(), "unexpected token");
+            state.next();
+        }
     }
 
     return &state.alloc(Module {
+            .span = Span { .start = start, .end = state.previous_end() },
             .imports = &state.alloc_array(&imports.view()),
             .definitions = &state.alloc_array(&definitions.view())
         });
 }
 
 fn parse_import_decl(self state: &var ParserState) -> ImportDecl {
-    panic;
+    const recover = |&var state| () {
+        const sync = &[
+            TokenKind::op_semicolon,
+            TokenKind::kw_import,
+            TokenKind::kw_fn,
+            TokenKind::kw_type,
+            TokenKind::kw_pub,
+            TokenKind::kw_exp,
+            TokenKind::kw_macro,
+            TokenKind::kw_interface,
+            TokenKind::kw_extern
+        ][..];
+
+        state.synchronize(&sync);
+        if (state.peek() is ::Some |&token| && token.kind is TokenKind::op_semicolon) {
+            state.next();
+        }
+    };
+
+    const placeholder = (span: &Span) {
+        return ImportDecl { .span = span, .path = [], .alias = ::None };
+    };
+
+    const start = state.current_span().start;
+    state.next(); // 'import'
+
+    var path = Vector::empty<Ident>();
+    if (state.expect(TokenKind::identifier, "expected identifier") is ::Some |&token|) {
+        path.push(state.ident(&token));
+    } else {
+        recover();
+        return placeholder(Span { .start = start, .end = state.previous_end() });
+    }
+
+    while (state.peek() is ::Some |&token| && token.kind is TokenKind::op_colon_colon) {
+        state.next();
+        if (state.expect(TokenKind::identifier, "expected identifier") is ::Some |&id_token|) {
+            path.push(state.ident(&id_token));
+        } else {
+            recover();
+            return ImportDecl {
+                .span = Span { .start = start, .end = state.previous_end() },
+                .path = &state.alloc_array(&path.view()),
+                .alias = ::None
+            };
+        }
+    }
+
+    var alias: Option<Ident> = ::None;
+    if (state.peek() is ::Some |&token| && token.kind is TokenKind::kw_as) {
+        state.next();
+        if (state.expect(TokenKind::identifier, "expected identifier") is ::Some |&id_token|) {
+            alias = ::Some(state.ident(&id_token));
+        } else {
+            recover();
+            return ImportDecl {
+                .span = Span { .start = start, .end = state.previous_end() },
+                .path = &state.alloc_array(&path.view()),
+                .alias = ::None
+            };
+        }
+    }
+
+    if (state.expect(TokenKind::op_semicolon, "expected ';'") is ::None) {
+        recover();
+    }
+
+    return ImportDecl {
+        .span = Span { .start = start, .end = state.previous_end() },
+        .path = &state.alloc_array(&path.view()),
+        .alias = alias
+    };
 }
 
 fn parse_definition(self state: &var ParserState) -> Definition {

@@ -5,11 +5,14 @@ import token_kind;
 import token;
 import source_cursor;
 import tokenizer_state;
+import source::span;
+import diagnostics::diagnostics;
 
-pub fn tokenize(src: &[u8]) -> Vector<Token> {
+pub fn tokenize(src: &[u8], diagnostics: &var Diagnostics) -> Vector<Token> {
     var state = TokenizerState {
         .cursor = SourceCursor::create(&src),
-        .tokens = Vector::empty()
+        .tokens = Vector::empty(),
+        .diagnostics = &var diagnostics
     };
 
     while (state.has_next()) {
@@ -25,10 +28,10 @@ pub fn tokenize(src: &[u8]) -> Vector<Token> {
 
         const start_index = state.cursor.index;
         state.next();
-        state.push(Token { .kind = ::error_invalid_character, .start = start_index, .end = state.cursor.index });
+        state.error(Span { .start = start_index, .end = state.cursor.index }, "unexpected character");
     }
 
-    state.push(Token { .kind = ::end_of_file, .start = state.cursor.index, .end = state.cursor.index });
+    state.push(Token { .kind = ::end_of_file, .span = Span::empty(state.cursor.index) });
 
     return state.tokens;
 }
@@ -100,7 +103,7 @@ fn tokenize_comment(state: &var TokenizerState) -> bool {
 
                 const end_index = state.cursor.index;
 
-                state.push(Token { .kind = ::comment, .start = start_index, .end = end_index });
+                state.push(Token { .kind = ::comment, .span = Span { .start = start_index, .end = end_index } });
 
                 return true;
             }
@@ -126,9 +129,9 @@ fn tokenize_comment(state: &var TokenizerState) -> bool {
                 const end_index = state.cursor.index;
 
                 if (depth != 0) {
-                    state.push(Token { .kind = ::error_invalid_comment, .start = start_index, .end = end_index });
+                    state.error(Span { .start = start_index, .end = end_index }, "unterminated block comment");
                 } else {
-                    state.push(Token { .kind = ::comment, .start = start_index, .end = end_index });
+                    state.push(Token { .kind = ::comment, .span = Span { .start = start_index, .end = end_index } });
                 }
 
                 return true;
@@ -154,7 +157,7 @@ fn tokenize_identifier(state: &var TokenizerState) -> bool {
 
     const token_kind = if (keyword_token_kind(&token_view) is ::Some |&token_kind|) token_kind else ::identifier;
 
-    state.push(Token { .kind = token_kind, .start = start_index, .end = end_index });
+    state.push(Token { .kind = token_kind, .span = Span { .start = start_index, .end = end_index } });
 
     return true;
 }
@@ -173,7 +176,7 @@ fn tokenize_operator(state: &var TokenizerState) -> bool {
         const candidate = &state.cursor.src[state.cursor.index..end_index];
 
         if (operator_token_kind(&candidate) is ::Some |&token_kind|) {
-            state.push(Token { .kind = token_kind, .start = state.cursor.index, .end = end_index });
+            state.push(Token { .kind = token_kind, .span = Span { .start = state.cursor.index, .end = end_index } });
             state.cursor.index = end_index;
             return true;
         }
@@ -181,10 +184,10 @@ fn tokenize_operator(state: &var TokenizerState) -> bool {
         len -= 1;
     }
 
-    // no known operator/punctuation matched, consume one character as an error token.
+    // no known operator/punctuation matched, consume one character and report it.
     const start_index = state.cursor.index;
     state.next();
-    state.push(Token { .kind = ::error_invalid_operator, .start = start_index, .end = state.cursor.index });
+    state.error(Span { .start = start_index, .end = state.cursor.index }, "unknown operator or symbol");
 
     return true;
 }
@@ -272,12 +275,12 @@ fn tokenize_number_literal(state: &var TokenizerState) -> bool {
     const end_index = state.cursor.index;
 
     if (is_error) {
-        state.push(Token { .kind = ::error_invalid_number_literal, .start = start_index, .end = end_index });
+        state.error(Span { .start = start_index, .end = end_index }, "invalid number literal");
     }
     else if (is_float) {
-        state.push(Token { .kind = ::float_literal, .start = start_index, .end = end_index });
+        state.push(Token { .kind = ::float_literal, .span = Span { .start = start_index, .end = end_index } });
     } else {
-        state.push(Token { .kind = ::integer_literal, .start = start_index, .end = end_index });
+        state.push(Token { .kind = ::integer_literal, .span = Span { .start = start_index, .end = end_index } });
     }
 
     return true;
@@ -315,17 +318,17 @@ fn tokenize_string_or_char_literal(state: &var TokenizerState) -> bool {
 
     if (!terminated || !valid || empty_char) {
         if (first == '"') {
-            state.push(Token { .kind = ::error_invalid_string_literal, .start = start_index, .end = end_index });
+            state.error(Span { .start = start_index, .end = end_index }, "unterminated string literal");
         } else {
-            state.push(Token { .kind = ::error_invalid_char_literal, .start = start_index, .end = end_index });
+            state.error(Span { .start = start_index, .end = end_index }, "unterminated character literal");
         }
         return true;
     }
 
     if (first == '"') {
-        state.push(Token { .kind = ::string_literal, .start = start_index, .end = end_index });
+        state.push(Token { .kind = ::string_literal, .span = Span { .start = start_index, .end = end_index } });
     } else {
-        state.push(Token { .kind = ::char_literal, .start = start_index, .end = end_index });
+        state.push(Token { .kind = ::char_literal, .span = Span { .start = start_index, .end = end_index } });
     }
 
     return true;

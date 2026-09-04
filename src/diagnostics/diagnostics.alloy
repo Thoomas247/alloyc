@@ -1,0 +1,94 @@
+import std::vector;
+import std::string;
+import std::io as io;
+
+import source::span;
+
+pub type Severity = enum { Error, Warning };
+
+pub type Diagnostic = struct {
+    severity: Severity,
+    span: Span,
+    message: &[u8]
+};
+
+pub type Diagnostics = struct {
+    entries: Vector<Diagnostic>,
+    last_error_start: u64,
+    suppressed: u64
+};
+
+pub fn Diagnostics::empty() -> Diagnostics {
+    return Diagnostics {
+        .entries = Vector::empty(),
+        .last_error_start = 0,
+        .suppressed = 0
+    };
+}
+
+// Records a parse/compile error, use for anything the user needs to fix.
+pub fn error(self d: &var Diagnostics, span: Span, message: &[u8]) {
+    if (d.entries.length() > 0 && span.start == d.last_error_start) {
+        return;
+    }
+
+    if (d.entries.length() >= 20) {
+        d.suppressed += 1;
+        return;
+    }
+
+    d.entries.push(Diagnostic { .severity = Severity::Error, .span = span, .message = &message });
+    d.last_error_start = span.start;
+}
+
+pub fn warning(self d: &var Diagnostics, span: Span, message: &[u8]) {
+    if (d.entries.length() >= 20) {
+        d.suppressed += 1;
+        return;
+    }
+
+    d.entries.push(Diagnostic { .severity = Severity::Warning, .span = span, .message = &message });
+}
+
+pub fn has_errors(self d: &Diagnostics) -> bool {
+    for (d.entries) |&entry| {
+        if (entry.severity is Severity::Error) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+pub fn count(self d: &Diagnostics) -> u64 {
+    return d.entries.length();
+}
+
+pub fn debug_print(self d: &Diagnostics) {
+    for (d.entries) |&entry| {
+        var line = String::with_capacity(64);
+
+        if (entry.severity is Severity::Error) {
+            line.append("error");
+        } else {
+            line.append("warning");
+        }
+
+        line.append(" [");
+        line.append_integer(entry.span.start to i64);
+        line.append("..");
+        line.append_integer(entry.span.end to i64);
+        line.append("]: ");
+        line.append(&entry.message);
+
+        io::print_line(&line.view());
+    }
+
+    if (d.suppressed > 0) {
+        var line = String::with_capacity(32);
+        line.append("(");
+        line.append_integer(d.suppressed to i64);
+        line.append(" more suppressed)");
+        io::print_line(&line.view());
+    }
+}

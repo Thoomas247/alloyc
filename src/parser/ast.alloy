@@ -1,17 +1,28 @@
 import std::option;
 
 import tokenizer::token;
+import source::span;
+
+// An identifier. Use ParserState.text() to recover the text.
+pub type Ident = Span;
+
+// Marks a span that failed to parse; the reason lives in the diagnostics sink.
+pub type ErrorNode = struct {
+    span: Span
+};
 
 // --- Top level ---
 
 pub type Module = struct {
+    span: Span,
     imports: &[ImportDecl],
     definitions: &[Definition]
 };
 
 pub type ImportDecl = struct {
-    path: &[&[u8]],
-    alias: Option<&[u8]>
+    span: Span,
+    path: &[Ident],
+    alias: Option<Ident>
 };
 
 pub type Visibility = enum { Private, Pub, Exp };
@@ -21,29 +32,45 @@ pub type DefinitionKind = enum {
     FnDef: &FnDef,
     ExternDef: &ExternDef,
     InterfaceDef: &InterfaceDef,
-    MacroDef: &MacroDef
+    MacroDef: &MacroDef,
+    Error: &ErrorNode
 };
 
+pub fn span(self kind: &DefinitionKind) -> Span {
+    return match (kind) {
+        DefinitionKind::TypeDef |&v| v.span;
+        DefinitionKind::FnDef |&v| v.span;
+        DefinitionKind::ExternDef |&v| v.span;
+        DefinitionKind::InterfaceDef |&v| v.span;
+        DefinitionKind::MacroDef |&v| v.span;
+        DefinitionKind::Error |&v| v.span;
+    };
+}
+
 pub type Definition = struct {
+    span: Span,
     visibility: Visibility,
     kind: DefinitionKind
 };
 
 pub type TypeDef = struct {
-    name: &[u8],
+    span: Span,
+    name: Ident,
     type_params: &[TypeParam],
     markers: &[InterfaceMarker],
     value: &Type
 };
 
 pub type InterfaceDef = struct {
-    name: &[u8],
+    span: Span,
+    name: Ident,
     type_params: &[TypeParam],
     functions: &[InterfaceFn]
 };
 
 pub type InterfaceFn = struct {
-    name: &[u8],
+    span: Span,
+    name: Ident,
     receiver: Receiver,
     params: &[Param],
     return_type: Option<&Type>
@@ -52,58 +79,65 @@ pub type InterfaceFn = struct {
 pub type Receiver = enum { Ref, RefVar, Ptr, PtrVar };
 
 pub type InterfaceMarker = struct {
-    path: &[&[u8]],
+    span: Span,
+    path: &[Ident],
     type_args: &[Type]
 };
 
 pub type FnDef = struct {
-    qualifier: Option<&[u8]>,
-    name: &[u8],
+    span: Span,
+    qualifier: Option<Ident>,
+    name: Ident,
     type_params: &[TypeParam],
     function: &Function
 };
 
 pub type MacroDef = struct {
-    name: &[u8],
+    span: Span,
+    name: Ident,
     params: &[MacroParam],
     return_type: &Type,
     body: Option<&StmtBlock>
 };
 
 pub type MacroParam = struct {
-    name: &[u8],
+    span: Span,
+    name: Ident,
     type_annotation: Option<&Type>
 };
 
 pub type ExternDef = struct {
-    name: &[u8],
+    span: Span,
+    name: Ident,
     params: ExternParams,
     return_type: Option<&Type>
 };
 
-// Collapses the three "empty / params[, ...] / bare ..." grammar
-// alternatives into the two shapes that actually matter downstream.
+// Whether an extern fn accepts extra C-variadic args.
 pub type ExternParams = enum {
     Fixed: &[Param],
     Variadic: &[Param]
 };
 
 pub type TypeParam = struct {
-    name: &[u8],
+    span: Span,
+    name: Ident,
     constraint: Option<&InterfaceMarker>
 };
 
 // --- Functions ---
 
 pub type Function = struct {
+    span: Span,
     params: &[Param],
     return_type: Option<&Type>,
     body: &StmtBlock
 };
 
 pub type Param = struct {
+    span: Span,
     is_self: bool,
-    name: &[u8],
+    name: Ident,
     type_annotation: &Type
 };
 
@@ -113,10 +147,20 @@ pub type TypeModifier = enum { None, Ptr, PtrVar, Ref, RefVar };
 
 pub type TypeBase = enum {
     Base: BaseType,
-    Nested: &Type
+    Nested: &Type,
+    Error: &ErrorNode
 };
 
+pub fn span(self base: &TypeBase) -> Span {
+    return match (base) {
+        TypeBase::Base |&v| v.span();
+        TypeBase::Nested |&v| v.span;
+        TypeBase::Error |&v| v.span;
+    };
+}
+
 pub type Type = struct {
+    span: Span,
     modifier: TypeModifier,
     base: TypeBase
 };
@@ -127,39 +171,58 @@ pub type BaseType = enum {
     EnumType: &EnumType,
     ArrayType: &ArrayType,
     FnType: &FnType,
-    ComptimeTypeDescriptor,
+    ComptimeTypeDescriptor: Span,
     ComptimeExpr: &ComptimeExpr
 };
 
+pub fn span(self base: &BaseType) -> Span {
+    return match (base) {
+        BaseType::NamedType |&v| v.span;
+        BaseType::StructType |&v| v.span;
+        BaseType::EnumType |&v| v.span;
+        BaseType::ArrayType |&v| v.span;
+        BaseType::FnType |&v| v.span;
+        BaseType::ComptimeTypeDescriptor |s| s;
+        BaseType::ComptimeExpr |&v| v.span;
+    };
+}
+
 pub type NamedType = struct {
-    path: &[&[u8]],
+    span: Span,
+    path: &[Ident],
     type_args: &[Type]
 };
 
 pub type StructType = struct {
+    span: Span,
     members: &[StructMember]
 };
 
 pub type StructMember = struct {
-    name: &[u8],
+    span: Span,
+    name: Ident,
     type_annotation: &Type
 };
 
 pub type EnumType = struct {
+    span: Span,
     members: &[EnumMember]
 };
 
 pub type EnumMember = struct {
-    name: &[u8],
+    span: Span,
+    name: Ident,
     payload_type: Option<&Type>
 };
 
 pub type ArrayType = struct {
+    span: Span,
     element_type: &Type,
     size: Option<&Expression>
 };
 
 pub type FnType = struct {
+    span: Span,
     param_types: &[Type],
     return_type: Option<&Type>
 };
@@ -177,37 +240,63 @@ pub type Statement = enum {
     ContinueStmt: &ContinueStmt,
     YieldStmt: &YieldStmt,
     ReturnStmt: &ReturnStmt,
-    ExprStmt: &ExprStmt
+    ExprStmt: &ExprStmt,
+    Error: &ErrorNode
 };
+
+pub fn span(self stmt: &Statement) -> Span {
+    return match (stmt) {
+        Statement::VarDef |&v| v.span;
+        Statement::StmtBlock |&v| v.span;
+        Statement::IfExpr |&v| v.span;
+        Statement::ForExpr |&v| v.span;
+        Statement::WhileExpr |&v| v.span;
+        Statement::MatchExpr |&v| v.span;
+        Statement::BreakStmt |&v| v.span;
+        Statement::ContinueStmt |&v| v.span;
+        Statement::YieldStmt |&v| v.span;
+        Statement::ReturnStmt |&v| v.span;
+        Statement::ExprStmt |&v| v.span;
+        Statement::Error |&v| v.span;
+    };
+}
 
 pub type Mutability = enum { Var, Const };
 
 pub type VarDef = struct {
+    span: Span,
     mutability: Mutability,
-    name: &[u8],
+    name: Ident,
     type_annotation: Option<&Type>,
     value: &Expression
 };
 
 pub type StmtBlock = struct {
+    span: Span,
     statements: &[Statement]
 };
 
 pub type BreakStmt = struct {
+    span: Span,
     value: Option<&Expression>
 };
 
-pub type ContinueStmt = struct {};
+pub type ContinueStmt = struct {
+    span: Span
+};
 
 pub type YieldStmt = struct {
+    span: Span,
     value: &Expression
 };
 
 pub type ReturnStmt = struct {
+    span: Span,
     value: Option<&Expression>
 };
 
 pub type ExprStmt = struct {
+    span: Span,
     expr: &Expression,
     assignment: Option<&Assignment>
 };
@@ -218,6 +307,7 @@ pub type AssignOp = enum {
 };
 
 pub type Assignment = struct {
+    span: Span,
     op: AssignOp,
     value: &Expression
 };
@@ -232,11 +322,13 @@ pub type BinaryOp = enum {
 };
 
 pub type BinaryOperand = struct {
+    span: Span,
     op: BinaryOp,
     rhs: &CastExpr
 };
 
 pub type Expression = struct {
+    span: Span,
     first: &CastExpr,
     rest: &[BinaryOperand]
 };
@@ -246,7 +338,15 @@ pub type IsTarget = enum {
     NamedType: &NamedType
 };
 
+pub fn span(self target: &IsTarget) -> Span {
+    return match (target) {
+        IsTarget::ImpliedVariant |&v| v.span;
+        IsTarget::NamedType |&v| v.span;
+    };
+}
+
 pub type IsClause = struct {
+    span: Span,
     target: IsTarget,
     capture: Option<&Capture>
 };
@@ -257,7 +357,16 @@ pub type CastSuffix = enum {
     To: &Type
 };
 
+pub fn span(self suffix: &CastSuffix) -> Span {
+    return match (suffix) {
+        CastSuffix::Is |&v| v.span;
+        CastSuffix::As |&v| v.span;
+        CastSuffix::To |&v| v.span;
+    };
+}
+
 pub type CastExpr = struct {
+    span: Span,
     operand: UnaryExpr,
     suffixes: &[CastSuffix]
 };
@@ -266,15 +375,26 @@ pub type UnaryOp = enum { Neg, BitNot, Not, Ref, RefVar, New, Move };
 
 pub type UnaryExpr = enum {
     Unary: &UnaryOperation,
-    Postfix: &PostfixExpr
+    Postfix: &PostfixExpr,
+    Error: &ErrorNode
 };
 
+pub fn span(self expr: &UnaryExpr) -> Span {
+    return match (expr) {
+        UnaryExpr::Unary |&v| v.span;
+        UnaryExpr::Postfix |&v| v.span;
+        UnaryExpr::Error |&v| v.span;
+    };
+}
+
 pub type UnaryOperation = struct {
+    span: Span,
     op: UnaryOp,
     operand: UnaryExpr
 };
 
 pub type PostfixExpr = struct {
+    span: Span,
     primary: PrimaryExpr,
     suffixes: &[PostfixSuffix]
 };
@@ -287,24 +407,39 @@ pub type PostfixSuffix = enum {
     Subslice: &SubsliceSuffix
 };
 
+pub fn span(self suffix: &PostfixSuffix) -> Span {
+    return match (suffix) {
+        PostfixSuffix::Call |&v| v.span;
+        PostfixSuffix::GenericCall |&v| v.span;
+        PostfixSuffix::Member |&v| v.span;
+        PostfixSuffix::Index |&v| v.span;
+        PostfixSuffix::Subslice |&v| v.span;
+    };
+}
+
 pub type CallSuffix = struct {
+    span: Span,
     arguments: &[Expression]
 };
 
 pub type GenericCallSuffix = struct {
+    span: Span,
     type_args: &[Type],
     arguments: &[Expression]
 };
 
 pub type MemberAccessSuffix = struct {
-    name: &[u8]
+    span: Span,
+    name: Ident
 };
 
 pub type IndexSuffix = struct {
+    span: Span,
     index: &Expression
 };
 
 pub type SubsliceSuffix = struct {
+    span: Span,
     start: Option<&Expression>,
     end: &Expression
 };
@@ -327,12 +462,34 @@ pub type PrimaryExpr = enum {
     ComptimeExpr: &ComptimeExpr
 };
 
+pub fn span(self primary: &PrimaryExpr) -> Span {
+    return match (primary) {
+        PrimaryExpr::Literal |&v| v.span();
+        PrimaryExpr::IdentifierExpr |&v| v.span;
+        PrimaryExpr::ImpliedVariant |&v| v.span;
+        PrimaryExpr::NamedStructInit |&v| v.span;
+        PrimaryExpr::AnonStructInit |&v| v.span;
+        PrimaryExpr::Parenthesized |&v| v.span;
+        PrimaryExpr::ArrayFill |&v| v.span;
+        PrimaryExpr::ArrayRange |&v| v.span;
+        PrimaryExpr::ArrayLiteral |&v| v.span;
+        PrimaryExpr::IfExpr |&v| v.span;
+        PrimaryExpr::ForExpr |&v| v.span;
+        PrimaryExpr::WhileExpr |&v| v.span;
+        PrimaryExpr::MatchExpr |&v| v.span;
+        PrimaryExpr::LambdaExpr |&v| v.span;
+        PrimaryExpr::ComptimeExpr |&v| v.span;
+    };
+}
+
 pub type IdentifierExpr = struct {
-    path: &[&[u8]]
+    span: Span,
+    path: &[Ident]
 };
 
 pub type ImpliedVariant = struct {
-    name: &[u8]
+    span: Span,
+    name: Ident
 };
 
 pub type Literal = enum {
@@ -344,36 +501,54 @@ pub type Literal = enum {
     False: &Token
 };
 
+pub fn span(self literal: &Literal) -> Span {
+    return match (literal) {
+        Literal::Integer |&v| v.span;
+        Literal::Float |&v| v.span;
+        Literal::String |&v| v.span;
+        Literal::Char |&v| v.span;
+        Literal::True |&v| v.span;
+        Literal::False |&v| v.span;
+    };
+}
+
 pub type ArrayLiteral = struct {
+    span: Span,
     elements: &[Expression]
 };
 
 pub type ArrayFill = struct {
+    span: Span,
     value: &Expression,
     count: &Expression
 };
 
 pub type ArrayRange = struct {
+    span: Span,
     start: Option<&Expression>,
     end: &Expression
 };
 
 pub type NamedStructInit = struct {
-    path: &[&[u8]],
+    span: Span,
+    path: &[Ident],
     type_args: &[Type],
     members: &[MemberInit]
 };
 
 pub type AnonStructInit = struct {
+    span: Span,
     members: &[MemberInit]
 };
 
 pub type MemberInit = struct {
-    name: &[u8],
+    span: Span,
+    name: Ident,
     value: &Expression
 };
 
 pub type LambdaExpr = struct {
+    span: Span,
     captures: &[Capture],
     function: &Function
 };
@@ -381,11 +556,13 @@ pub type LambdaExpr = struct {
 pub type CaptureMode = enum { Value, Ref, RefVar, Move };
 
 pub type Capture = struct {
+    span: Span,
     mode: CaptureMode,
-    name: &[u8]
+    name: Ident
 };
 
 pub type IfExpr = struct {
+    span: Span,
     condition: &Expression,
     then_branch: IfBranch,
     else_branch: Option<IfBranch>
@@ -396,7 +573,15 @@ pub type IfBranch = enum {
     Expression: &Expression
 };
 
+pub fn span(self branch: &IfBranch) -> Span {
+    return match (branch) {
+        IfBranch::StmtBlock |&v| v.span;
+        IfBranch::Expression |&v| v.span;
+    };
+}
+
 pub type ForExpr = struct {
+    span: Span,
     subjects: &[Expression],
     captures: &[Capture],
     body: &StmtBlock,
@@ -404,12 +589,14 @@ pub type ForExpr = struct {
 };
 
 pub type WhileExpr = struct {
+    span: Span,
     condition: &Expression,
     body: &StmtBlock,
     else_block: Option<&StmtBlock>
 };
 
 pub type MatchExpr = struct {
+    span: Span,
     subject: &Expression,
     arms: &[MatchArmEntry],
     else_block: Option<&StmtBlock>
@@ -417,15 +604,30 @@ pub type MatchExpr = struct {
 
 pub type MatchPattern = enum {
     Expression: &Expression,
-    Else
+    Else: Span
 };
+
+pub fn span(self pattern: &MatchPattern) -> Span {
+    return match (pattern) {
+        MatchPattern::Expression |&v| v.span;
+        MatchPattern::Else |s| s;
+    };
+}
 
 pub type MatchArmBody = enum {
     StmtBlock: &StmtBlock,
     Expression: &Expression
 };
 
+pub fn span(self body: &MatchArmBody) -> Span {
+    return match (body) {
+        MatchArmBody::StmtBlock |&v| v.span;
+        MatchArmBody::Expression |&v| v.span;
+    };
+}
+
 pub type MatchArmEntry = struct {
+    span: Span,
     pattern: MatchPattern,
     capture: Option<&Capture>,
     body: MatchArmBody
@@ -437,6 +639,15 @@ pub type ComptimeTarget = enum {
     EnumType: &EnumType
 };
 
+pub fn span(self target: &ComptimeTarget) -> Span {
+    return match (target) {
+        ComptimeTarget::PostfixExpr |&v| v.span;
+        ComptimeTarget::StructType |&v| v.span;
+        ComptimeTarget::EnumType |&v| v.span;
+    };
+}
+
 pub type ComptimeExpr = struct {
+    span: Span,
     target: ComptimeTarget
 };

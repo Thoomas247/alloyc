@@ -4,6 +4,7 @@ import std::process;
 import tokenizer::tokenizer;
 import parser::parser;
 import parser::node_allocator;
+import diagnostics::diagnostics;
 
 fn main() {
     const entry_path = "tests/tokenizer_test.alloy";
@@ -17,11 +18,15 @@ fn compile_module(path: &[u8]) {
         return;
     };
 
-    const tokens = tokenize(&src);
+    var diagnostics = Diagnostics::empty();
+
+    const tokens = tokenize(&src, &var diagnostics);
     tokens.debug_print(&src);
 
     const alloc_page_size: u64 = 10 * 1024 * 1024; // 10 MB
     var allocator = NodeAllocator::empty(alloc_page_size);
 
-    const module = parse(&tokens, &src, &var allocator);
+    const module = parse(&tokens, &src, &var diagnostics, &var allocator);
+
+    diagnostics.debug_print();
 }
