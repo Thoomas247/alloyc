@@ -2,13 +2,14 @@ import token_kind;
 
 pub type Token = struct {
     kind: TokenKind,
-    view: &[u8]
+    start: u64,
+    end: u64
 };
 
-pub fn to_string(self token: &Token) -> String {
+pub fn to_string(self token: &Token, src: &[u8]) -> String {
     const kind_name = &token.kind.name();
     const separator = " - ";
-    const value = &token.view;
+    const value = &src[token.start..token.end];
 
     var str = String::with_capacity(kind_name.length() + separator.length() + value.length());
 

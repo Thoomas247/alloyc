@@ -9,22 +9,27 @@ pub type TokenizerState = struct {
     tokens: Vector<Token>
 };
 
+// Returns the current character without moving the cursor.
 pub fn peek(self state: &TokenizerState) -> Option<u8> {
     return state.cursor.peek();
 }
 
+// Returns the character `offset` positions ahead. 0 for the current character.
 pub fn peek(self state: &TokenizerState, offset: u64) -> Option<u8> {
     return state.cursor.peek(offset);
 }
 
+// Returns true if there are more characters to read, false otherwise.
 pub fn has_next(self state: &TokenizerState) -> bool {
     return state.cursor.has_next();
 }
 
+// Returns the current character and moves the cursor forward, or ::None if past the end.
 pub fn next(self state: &var TokenizerState) -> Option<u8> {
     return state.cursor.next();
 }
 
+// Appends a token to the tokenizer's output.
 pub fn push(self state: &var TokenizerState, token: Token) {
     state.tokens.push(token);
 }

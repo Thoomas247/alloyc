@@ -13,10 +13,11 @@ type Result<T> = enum {
     Success: T
 };
 
-pub fn parse(tokens: &Vector<Token>, allocator: &var NodeAllocator) -> &Module {
+pub fn parse(tokens: &Vector<Token>, src: &[u8], allocator: &var NodeAllocator) -> &Module {
     var state = ParserState {
         .cursor = TokenCursor::create(&tokens.view()),
-        .alloc = &var allocator
+        .alloc = &var allocator,
+        .src = &src
     };
 
     return &state.parse_module();

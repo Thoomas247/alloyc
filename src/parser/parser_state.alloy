@@ -1,42 +1,55 @@
 import std::option;
 
 import tokenizer::token;
+import tokenizer::token_kind;
 import token_cursor;
 import node_allocator;
 
 pub type ParserState = struct {
     cursor: TokenCursor,
-    alloc: &var NodeAllocator
+    alloc: &var NodeAllocator,
+    src: &[u8]
 };
 
+// Returns the current token without moving the cursor.
 pub fn peek(self state: &ParserState) -> Option<&Token> {
     return state.cursor.peek();
 }
 
+// Returns the token `offset` positions ahead. 0 for the current token.
 pub fn peek(self state: &ParserState, offset: u64) -> Option<&Token> {
     return state.cursor.peek(offset);
 }
 
+// Returns true if there are more tokens to read, false otherwise.
 pub fn has_next(self state: &ParserState) -> bool {
     return state.cursor.has_next();
 }
 
+// Returns the current token and moves the cursor forward, or ::None if past the end.
 pub fn next(self state: &var ParserState) -> Option<&Token> {
     return state.cursor.next();
 }
 
+// Moves 'value' into the arena and returns a stable reference to the new value.
 pub fn alloc<T>(self state: &var ParserState, value: T) -> &var T {
     return &var state.alloc.alloc(value);
 }
 
+// Copies 'items' into one contiguous arena region and returns a stable view of the copy.
 pub fn alloc_array<T>(self state: &var ParserState, items: &[T]) -> &var [T] {
     return &var state.alloc.alloc_array(&items);
+}
+
+// Returns the source text a token was lexed from.
+pub fn text(self state: &ParserState, token: &Token) -> &[u8] {
+    return &state.src[token.start..token.end];
 }
 
 // Consumes the current token, which must be an identifier, and returns its text.
 pub fn expect_identifier(self state: &var ParserState) -> &[u8] {
     if (state.next() is ::Some |&token| && token.kind is TokenKind::identifier) {
-        return &token.view;
+        return &state.text(&token);
     }
 
     panic;

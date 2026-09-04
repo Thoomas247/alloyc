@@ -18,10 +18,10 @@ fn compile_module(path: &[u8]) {
     };
 
     const tokens = tokenize(&src);
-    tokens.debug_print();
+    tokens.debug_print(&src);
 
     const alloc_page_size: u64 = 10 * 1024 * 1024; // 10 MB
     var allocator = NodeAllocator::empty(alloc_page_size);
 
-    const module = parse(&tokens, &var allocator);
+    const module = parse(&tokens, &src, &var allocator);
 }
