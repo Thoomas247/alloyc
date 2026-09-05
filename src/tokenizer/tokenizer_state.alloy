@@ -39,5 +39,5 @@ pub fn push(self state: &var TokenizerState, token: Token) {
 
 // Records a lexical error at the given span.
 pub fn error(self state: &var TokenizerState, span: Span, message: &[u8]) {
-    state.diagnostics.error(span, &message);
+    state.diagnostics.error(::Lexical({ .span = span, .message = message }));
 }

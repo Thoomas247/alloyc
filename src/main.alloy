@@ -27,6 +27,4 @@ fn compile_module(path: &[u8]) {
     var allocator = NodeAllocator::empty(alloc_page_size);
 
     const module = parse(&tokens, &src, &var diagnostics, &var allocator);
-
-    diagnostics.debug_print();
 }

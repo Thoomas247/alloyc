@@ -4,12 +4,45 @@ import std::io as io;
 
 import source::span;
 
-pub type Severity = enum { Error, Warning };
+type Severity = enum {
+    Error,
+    Warning
+};
 
-pub type Diagnostic = struct {
-    severity: Severity,
+pub type Expectation = enum {
+    Token: TokenKind,
+    Identifier,
+    Definition
+};
+
+pub type Context = enum {
+    Module,
+    ImportDecl,
+    TypeDef,
+};
+
+pub type Note = struct {
     span: Span,
     message: &[u8]
+};
+
+pub type DiagnosticInfo = enum {
+    Lexical: struct {
+        span: Span,
+        message: &[u8]
+    },
+    Expected: struct {
+        span: Span,
+        expected: Expectation,
+        found: TokenKind,
+        context: Context,
+        notes: &[Note],
+    }
+};
+
+type Diagnostic = struct {
+    severity: Severity,
+    info: DiagnosticInfo
 };
 
 pub type Diagnostics = struct {
@@ -26,30 +59,6 @@ pub fn Diagnostics::empty() -> Diagnostics {
     };
 }
 
-// Records a parse/compile error, use for anything the user needs to fix.
-pub fn error(self d: &var Diagnostics, span: Span, message: &[u8]) {
-    if (d.entries.length() > 0 && span.start == d.last_error_start) {
-        return;
-    }
-
-    if (d.entries.length() >= 20) {
-        d.suppressed += 1;
-        return;
-    }
-
-    d.entries.push(Diagnostic { .severity = Severity::Error, .span = span, .message = &message });
-    d.last_error_start = span.start;
-}
-
-pub fn warning(self d: &var Diagnostics, span: Span, message: &[u8]) {
-    if (d.entries.length() >= 20) {
-        d.suppressed += 1;
-        return;
-    }
-
-    d.entries.push(Diagnostic { .severity = Severity::Warning, .span = span, .message = &message });
-}
-
 pub fn has_errors(self d: &Diagnostics) -> bool {
     for (d.entries) |&entry| {
         if (entry.severity is Severity::Error) {
@@ -64,31 +73,10 @@ pub fn count(self d: &Diagnostics) -> u64 {
     return d.entries.length();
 }
 
-pub fn debug_print(self d: &Diagnostics) {
-    for (d.entries) |&entry| {
-        var line = String::with_capacity(64);
+pub fn error(self d: &var Diagnostics, info: &DiagnosticInfo) {
+    d.entries.push(Diagnostic { .severity = Severity::Error, .info = info });
+}
 
-        if (entry.severity is Severity::Error) {
-            line.append("error");
-        } else {
-            line.append("warning");
-        }
-
-        line.append(" [");
-        line.append_integer(entry.span.start to i64);
-        line.append("..");
-        line.append_integer(entry.span.end to i64);
-        line.append("]: ");
-        line.append(&entry.message);
-
-        io::print_line(&line.view());
-    }
-
-    if (d.suppressed > 0) {
-        var line = String::with_capacity(32);
-        line.append("(");
-        line.append_integer(d.suppressed to i64);
-        line.append(" more suppressed)");
-        io::print_line(&line.view());
-    }
+pub fn warning(self d: &var Diagnostics, info: &DiagnosticInfo) {
+    d.entries.push(Diagnostic { .severity = Severity::Warning, .info = info });
 }

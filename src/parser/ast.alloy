@@ -11,7 +11,7 @@ pub type ErrorNode = struct {
     span: Span
 };
 
-// --- Top level ---
+/* --- Top level --- */
 
 pub type Module = struct {
     span: Span,
@@ -25,7 +25,12 @@ pub type ImportDecl = struct {
     alias: Option<Ident>
 };
 
-pub type Visibility = enum { Private, Pub, Exp };
+pub type Visibility = enum
+    {
+    Private,
+    Pub,
+    Exp
+};
 
 pub type DefinitionKind = enum {
     TypeDef: &TypeDef,
@@ -125,7 +130,7 @@ pub type TypeParam = struct {
     constraint: Option<&InterfaceMarker>
 };
 
-// --- Functions ---
+/* --- Functions --- */
 
 pub type Function = struct {
     span: Span,
@@ -141,7 +146,7 @@ pub type Param = struct {
     type_annotation: &Type
 };
 
-// --- Types ---
+/* --- Types --- */
 
 pub type TypeModifier = enum { None, Ptr, PtrVar, Ref, RefVar };
 
@@ -227,7 +232,7 @@ pub type FnType = struct {
     return_type: Option<&Type>
 };
 
-// --- Statements ---
+/* --- Statements --- */
 
 pub type Statement = enum {
     VarDef: &VarDef,
@@ -240,6 +245,7 @@ pub type Statement = enum {
     ContinueStmt: &ContinueStmt,
     YieldStmt: &YieldStmt,
     ReturnStmt: &ReturnStmt,
+    PanicStmt: &PanicStmt,
     ExprStmt: &ExprStmt,
     Error: &ErrorNode
 };
@@ -256,6 +262,7 @@ pub fn span(self stmt: &Statement) -> Span {
         Statement::ContinueStmt |&v| v.span;
         Statement::YieldStmt |&v| v.span;
         Statement::ReturnStmt |&v| v.span;
+        Statement::PanicStmt |&v| v.span;
         Statement::ExprStmt |&v| v.span;
         Statement::Error |&v| v.span;
     };
@@ -295,6 +302,11 @@ pub type ReturnStmt = struct {
     value: Option<&Expression>
 };
 
+pub type PanicStmt = struct {
+    span: Span,
+    message: Option<&Expression>
+};
+
 pub type ExprStmt = struct {
     span: Span,
     expr: &Expression,
@@ -312,7 +324,7 @@ pub type Assignment = struct {
     value: &Expression
 };
 
-// --- Expressions ---
+/* --- Expressions --- */
 
 pub type BinaryOp = enum {
     Add, Sub, Mul, Div, Mod,

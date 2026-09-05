@@ -10,54 +10,82 @@ import parser_state;
 import source::span;
 import diagnostics::diagnostics;
 
-type Result<T> = enum {
-    Error: &[u8],
-    Success: T
-};
-
 pub fn parse(tokens: &Vector<Token>, src: &[u8], diagnostics: &var Diagnostics, allocator: &var NodeAllocator) -> &Module {
     var state = ParserState {
         .cursor = TokenCursor::create(&tokens.view()),
         .alloc = &var allocator,
         .diagnostics = &var diagnostics,
-        .src = &src
+        .src = &src,
+        .contexts = Vector::empty()
     };
 
     return &state.parse_module();
 }
 
+// module = { import_decl } { definition } EOF
 fn parse_module(self state: &var ParserState) -> &Module {
-    const start = state.current_span().start;
+    const start = state.enter(::Module);
 
     var imports = Vector::empty<ImportDecl>();
-    while (state.peek() is ::Some |&token| && token.kind is TokenKind::kw_import) {
-        const before = state.cursor.index;
+    var definitions = Vector::empty<Definition>();
+
+    while (state.at(::kw_import)) {
         imports.push(state.parse_import_decl());
-        if (state.cursor.index == before) {
-            state.error(state.current_span(), "unexpected token");
-            state.next();
-        }
     }
 
-    var definitions = Vector::empty<Definition>();
-    while (state.has_next()) {
+    while (!state.at(::end_of_file)) {
         const before = state.cursor.index;
         definitions.push(state.parse_definition());
         if (state.cursor.index == before) {
-            state.error(state.current_span(), "unexpected token");
+            // the dispatcher reported the token so only step past it
             state.next();
         }
     }
 
     return &state.alloc(Module {
-            .span = Span { .start = start, .end = state.previous_end() },
+            .span = state.leave(start),
             .imports = &state.alloc_array(&imports.view()),
             .definitions = &state.alloc_array(&definitions.view())
         });
 }
 
+// import_decl = "import" identifier { "::" identifier } [ "as" identifier ] ";"
 fn parse_import_decl(self state: &var ParserState) -> ImportDecl {
-    const recover = |&var state| () {
+    const start = state.enter(::ImportDecl);
+    var ok = true;
+
+    var path = Vector::empty<Ident>();
+    var alias: Option<Ident> = ::None;
+
+    state.assert(::kw_import);
+
+    if (state.expect_ident() is ::Some |id|) {
+        path.push(id);
+    } else {
+        ok = false;
+    }
+
+    while (ok && state.eat(::op_colon_colon)) {
+        if (state.expect_ident() is ::Some |id|) {
+            path.push(id);
+        } else {
+            ok = false;
+        }
+    }
+
+    if (ok && state.eat(::kw_as)) {
+        if (state.expect_ident() is ::Some |id|) {
+            alias = ::Some(id);
+        } else {
+            ok = false;
+        }
+    }
+
+    if (ok && state.expect(::op_semicolon) is ::None) {
+        ok = false;
+    }
+
+    if (!ok) {
         const sync = &[
             TokenKind::op_semicolon,
             TokenKind::kw_import,
@@ -69,68 +97,462 @@ fn parse_import_decl(self state: &var ParserState) -> ImportDecl {
             TokenKind::kw_interface,
             TokenKind::kw_extern
         ][..];
-
-        state.synchronize(&sync);
-        if (state.peek() is ::Some |&token| && token.kind is TokenKind::op_semicolon) {
-            state.next();
-        }
-    };
-
-    const placeholder = (span: &Span) {
-        return ImportDecl { .span = span, .path = [], .alias = ::None };
-    };
-
-    const start = state.current_span().start;
-    state.next(); // 'import'
-
-    var path = Vector::empty<Ident>();
-    if (state.expect(TokenKind::identifier, "expected identifier") is ::Some |&token|) {
-        path.push(state.ident(&token));
-    } else {
-        recover();
-        return placeholder(Span { .start = start, .end = state.previous_end() });
-    }
-
-    while (state.peek() is ::Some |&token| && token.kind is TokenKind::op_colon_colon) {
-        state.next();
-        if (state.expect(TokenKind::identifier, "expected identifier") is ::Some |&id_token|) {
-            path.push(state.ident(&id_token));
-        } else {
-            recover();
-            return ImportDecl {
-                .span = Span { .start = start, .end = state.previous_end() },
-                .path = &state.alloc_array(&path.view()),
-                .alias = ::None
-            };
-        }
-    }
-
-    var alias: Option<Ident> = ::None;
-    if (state.peek() is ::Some |&token| && token.kind is TokenKind::kw_as) {
-        state.next();
-        if (state.expect(TokenKind::identifier, "expected identifier") is ::Some |&id_token|) {
-            alias = ::Some(state.ident(&id_token));
-        } else {
-            recover();
-            return ImportDecl {
-                .span = Span { .start = start, .end = state.previous_end() },
-                .path = &state.alloc_array(&path.view()),
-                .alias = ::None
-            };
-        }
-    }
-
-    if (state.expect(TokenKind::op_semicolon, "expected ';'") is ::None) {
-        recover();
+        state.recover(&sync, ::op_semicolon);
     }
 
     return ImportDecl {
-        .span = Span { .start = start, .end = state.previous_end() },
+        .span = state.leave(start),
         .path = &state.alloc_array(&path.view()),
         .alias = alias
     };
 }
 
+// definition = [ "pub" | "exp" ] ( type_def | fn_def | extern_def | interface_def | macro_def ) ;
 fn parse_definition(self state: &var ParserState) -> Definition {
+    const start = state.current_span().start;
+
+    const visibility = if (state.eat(::kw_exp)) Visibility::Exp
+        else if (state.eat(::kw_pub)) Visibility::Pub
+        else Visibility::Private;
+
+    const kind: DefinitionKind = match (state.current_kind()) {
+        ::kw_type DefinitionKind::TypeDef(&state.alloc(state.parse_type_def()));
+        ::kw_fn DefinitionKind::FnDef(&state.alloc(state.parse_fn_def()));
+        ::kw_extern DefinitionKind::ExternDef(&state.alloc(state.parse_extern_def()));
+        ::kw_interface DefinitionKind::InterfaceDef(&state.alloc(state.parse_interface_def()));
+        ::kw_macro DefinitionKind::MacroDef(&state.alloc(state.parse_macro_def()));
+        else {
+            state.expected(Expectation::Definition);
+
+            const sync = &[
+                TokenKind::op_semicolon,
+                TokenKind::kw_fn,
+                TokenKind::kw_type,
+                TokenKind::kw_pub,
+                TokenKind::kw_exp,
+                TokenKind::kw_macro,
+                TokenKind::kw_interface,
+                TokenKind::kw_extern
+            ][..];
+
+            state.next();
+            state.recover(&sync, ::op_semicolon);
+
+            yield DefinitionKind::Error(&state.error_node(Span { .start = start, .end = state.previous_end() }));
+        }
+    };
+
+    return Definition {
+        .span = Span { .start = start, .end = state.previous_end() },
+        .visibility = visibility,
+        .kind = kind
+    };
+}
+
+// type_def = "type" identifier [ "<" type_param { "," type_param } ">" ] [ ":" interface_marker { "," interface_marker } ] "=" type terminator ;
+fn parse_type_def(self state: &var ParserState) -> TypeDef {
+    const start = state.enter(::TypeDef);
+    var ok = true;
+
+    state.assert(::kw_type);
+    const name = if (state.expect_ident() is ::Some |id|) id else {
+        ok = false;
+        yield state.missing_ident();
+    };
+
+    var type_params = Vector::empty<TypeParam>();
+    if (ok && state.eat(::op_angle_left)) {
+        type_params.push(state.parse_type_param());
+
+        while (state.eat(::op_comma)) {
+            type_params.push(state.parse_type_param());
+        }
+
+        if (state.expect(::op_angle_right) is ::None) {
+            ok = false;
+        }
+    }
+
+    var markers = Vector::empty<InterfaceMarker>();
+    if (ok && state.eat(::op_colon)) {
+        markers.push(state.parse_interface_marker());
+
+        while (state.eat(::op_comma)) {
+            markers.push(state.parse_interface_marker());
+        }
+    }
+
+    if (ok && state.expect(::op_equal) is ::None) {
+        ok = false;
+    }
+
+    const value = if (ok) state.parse_type() else state.missing_type();
+
+    if (ok && state.expect(::op_semicolon) is ::None) {
+        ok = false;
+    }
+
+    return TypeDef {
+        .span = state.leave(start),
+        .name = name,
+        .type_params = &state.alloc_array(&type_params.view()),
+        .markers = &state.alloc_array(&markers.view()),
+        .value = &state.alloc(value)
+    };
+}
+
+// interface_def = "interface" identifier [ "<" type_param { "," type_param } ">" ] "{" { interface_fn } "}" ;
+fn parse_interface_def(self state: &var ParserState) -> InterfaceDef {
+    /*
+    pub type InterfaceDef = struct {
+        span: Span,
+        name: Ident,
+        type_params: &[TypeParam],
+        functions: &[InterfaceFn]
+    };
+    */
+
+    const start = state.enter(::TypeDef);
+    var ok = true;
+
+    panic;
+}
+
+// interface_fn = "fn" identifier "(" receiver { "," param } ")" [ "->" type ] terminator ;
+fn parse_interface_fn(self state: &var ParserState) -> InterfaceFn {
+    panic;
+}
+
+// receiver = "self" ":" ( "&" | "&" "var" | "*" | "*" "var" ) ;
+fn parse_receiver(self state: &var ParserState) -> Receiver {
+    panic;
+}
+
+// interface_marker = identifier [ "<" type { "," type } ">" ] ;
+fn parse_interface_marker(self state: &var ParserState) -> InterfaceMarker {
+    panic;
+}
+
+// fn_def = "fn" [ identifier "::" ] identifier [ "<" type_param { "," type_param } ">" ] function ;
+fn parse_fn_def(self state: &var ParserState) -> FnDef {
+    panic;
+}
+
+// macro_def = "macro" identifier "(" [ macro_param { "," macro_param } ] ")" "->" type
+//                   ( stmt_block | terminator ) ;
+fn parse_macro_def(self state: &var ParserState) -> MacroDef {
+    panic;
+}
+
+// macro_param = identifier [ ":" type ] ;
+fn parse_macro_param(self state: &var ParserState) -> MacroParam {
+    panic;
+}
+
+// extern_def = "extern" identifier "(" extern_params ")" [ "->" type ] terminator ;
+fn parse_extern_def(self state: &var ParserState) -> ExternDef {
+    panic;
+}
+
+// extern_params = /* empty */
+//               | param { "," param } [ "," "..." ]
+//               | "..." ;
+fn parse_extern_params(self state: &var ParserState) -> ExternParams {
+    panic;
+}
+
+// type_param = identifier [ ":" interface_marker ] ;
+fn parse_type_param(self state: &var ParserState) -> TypeParam {
+    panic;
+}
+
+/* --- Functions --- */
+
+// function = "(" [ param { "," param } ] ")" [ "->" type ] stmt_block ;
+fn parse_function(self state: &var ParserState) -> Function {
+    panic;
+}
+
+// param = [ "self" ] identifier ":" type ;
+fn parse_param(self state: &var ParserState) -> Param {
+    panic;
+}
+
+/* --- Types --- */
+
+// type = type_modifier ( base_type | type ) ;
+fn parse_type(self state: &var ParserState) -> Type {
+    panic;
+}
+
+// type_modifier = /* none */ | "*" | "*" "var" | "&" | "&" "var" ;
+fn parse_type_modifier(self state: &var ParserState) -> TypeModifier {
+    panic;
+}
+
+// base_type = named_type
+//           | struct_type
+//           | enum_type
+//           | array_type
+//           | fn_type
+//           | "#Type"                (* comptime descriptor, §4.4 *)
+//           | comptime_expr ;
+fn parse_base_type(self state: &var ParserState) -> BaseType {
+    panic;
+}
+
+// named_type = identifier { "::" identifier } [ "<" type { "," type } ">" ] ;
+fn parse_named_type(self state: &var ParserState) -> NamedType {
+    panic;
+}
+
+// struct_type = "struct" "{" [ struct_member { "," struct_member } ] "}" ;
+fn parse_struct_type(self state: &var ParserState) -> StructType {
+    panic;
+}
+
+// struct_member = identifier ":" type ;
+fn parse_struct_member(self state: &var ParserState) -> StructMember {
+    panic;
+}
+
+// enum_type = "enum" "{" [ enum_member { "," enum_member } ] "}" ;
+fn parse_enum_type(self state: &var ParserState) -> EnumType {
+    panic;
+}
+
+// enum_member = identifier [ ":" type ] ;
+fn parse_enum_member(self state: &var ParserState) -> EnumMember {
+    panic;
+}
+
+// array_type = "[" type [ ":" expression ] "]" ;  (* sizeless form only under "&" or "*" *)
+fn parse_array_type(self state: &var ParserState) -> ArrayType {
+    panic;
+}
+
+// fn_type = "(" [ type { "," type } ] ")" [ "->" type ] ;
+fn parse_fn_type(self state: &var ParserState) -> FnType {
+    panic;
+}
+
+/* --- Statements --- */
+
+// statement = var_def
+//           | stmt_block
+//           | if_expr
+//           | for_expr
+//           | while_expr
+//           | match_expr
+//           | break_stmt
+//           | continue_stmt
+//           | yield_stmt
+//           | return_stmt
+//           | panic_stmt
+//           | expr_stmt ;
+fn parse_statement(self state: &var ParserState) -> Statement {
+    panic;
+}
+
+// var_def = ( "var" | "const" ) identifier [ ":" type ] "=" expression terminator ;
+fn parse_var_def(self state: &var ParserState) -> VarDef {
+    panic;
+}
+
+// stmt_block = "{" { statement } "}" ;
+fn parse_stmt_block(self state: &var ParserState) -> StmtBlock {
+    panic;
+}
+
+// break_stmt = "break" [ expression ] terminator ;
+fn parse_break_stmt(self state: &var ParserState) -> BreakStmt {
+    panic;
+}
+
+// continue_stmt = "continue" terminator ;
+fn parse_continue_stmt(self state: &var ParserState) -> ContinueStmt {
+    panic;
+}
+
+// yield_stmt = "yield" expression terminator ;
+fn parse_yield_stmt(self state: &var ParserState) -> YieldStmt {
+    panic;
+}
+
+// return_stmt = "return" [ expression ] terminator ;
+fn parse_return_stmt(self state: &var ParserState) -> ReturnStmt {
+    panic;
+}
+
+// panic_stmt = "panic" [ expression ] terminator ;   (* the expression is a '&[u8]' message, §5.3 *)
+fn parse_panic_stmt(self state: &var ParserState) -> PanicStmt {
+    panic;
+}
+
+// expr_stmt = expression ( assign_op expression terminator | terminator ) ;
+fn parse_expr_stmt(self state: &var ParserState) -> ExprStmt {
+    panic;
+}
+
+// assign_op = "=" | "+=" | "-=" | "*=" | "/=" | "%="
+//           | "<<=" | ">>=" | "&=" | "|=" | "^=" ;
+fn parse_assign_op(self state: &var ParserState) -> AssignOp {
+    panic;
+}
+
+/* --- Expressions --- */
+
+// expression = cast_expr { binary_op cast_expr } ;  (* grouping per the §3.2 precedence table *)
+fn parse_expression(self state: &var ParserState) -> Expression {
+    panic;
+}
+
+// binary_op = "+" | "-" | "*" | "/" | "%"
+//           | "==" | "!=" | "<" | "<=" | ">" | ">="
+//           | "&&" | "||"
+//           | "&" | "|" | "^" | "<<" | ">>" ;
+fn parse_binary_op(self state: &var ParserState) -> BinaryOp {
+    panic;
+}
+
+// cast_expr = unary_expr { "is" ( implied_variant | named_type ) [ "|" capture "|" ] | "as" type | "to" type } ;
+fn parse_cast_expr(self state: &var ParserState) -> CastExpr {
+    panic;
+}
+
+// unary_expr = unary_op unary_expr | postfix_expr ;
+fn parse_unary_expr(self state: &var ParserState) -> UnaryExpr {
+    panic;
+}
+
+// unary_op = "-" | "~" | "!" | "&" [ "var" ] | "new" | "move" ;
+fn parse_unary_op(self state: &var ParserState) -> UnaryOp {
+    panic;
+}
+
+// postfix_expr = primary_expr { postfix_suffix } ;
+fn parse_postfix_expr(self state: &var ParserState) -> PostfixExpr {
+    panic;
+}
+
+// postfix_suffix = "(" [ expr { "," expr } ] ")"                            (* call *)
+//                | "<" type { "," type } ">" "(" [ expr { "," expr } ] ")"  (* generic call *)
+//                | "." identifier                                                  (* member access *)
+//                | "[" expression "]"                                         (* array index *)
+//                | "[" [ expression ] ".." expression "]" ;                   (* subslice *)
+fn parse_postfix_suffix(self state: &var ParserState) -> PostfixSuffix {
+    panic;
+}
+
+// primary_expr = literal
+//              | identifier_expr
+//              | implied_variant
+//              | named_struct_init
+//              | anon_struct_init
+//              | "(" expression ")"
+//              | array_fill
+//              | array_range
+//              | array_literal
+//              | if_expr
+//              | for_expr
+//              | while_expr
+//              | match_expr
+//              | lambda_expr
+//              | comptime_expr ;
+fn parse_primary_expr(self state: &var ParserState) -> PrimaryExpr {
+    panic;
+}
+
+// identifier_expr = identifier { "::" identifier } ;
+fn parse_identifier_expr(self state: &var ParserState) -> IdentifierExpr {
+    panic;
+}
+
+// implied_variant = "::" identifier ;
+fn parse_implied_variant(self state: &var ParserState) -> ImpliedVariant {
+    panic;
+}
+
+// literal = integer_literal | float_literal | string_literal | char_literal | "true" | "false" ;
+fn parse_literal(self state: &var ParserState) -> Literal {
+    panic;
+}
+
+// array_literal = "[" [ expression { "," expression } ] "]" ;
+fn parse_array_literal(self state: &var ParserState) -> ArrayLiteral {
+    panic;
+}
+
+// array_fill = "[" expression ":" expression "]" ;
+fn parse_array_fill(self state: &var ParserState) -> ArrayFill {
+    panic;
+}
+
+// array_range = "[" [ expression ] ".." expression "]" ;
+fn parse_array_range(self state: &var ParserState) -> ArrayRange {
+    panic;
+}
+
+// named_struct_init = identifier { "::" identifier } [ "<" type { "," type } ">" ] "{" [ member_init { "," member_init } ] "}" ;
+fn parse_named_struct_init(self state: &var ParserState) -> NamedStructInit {
+    panic;
+}
+
+// anon_struct_init = "{" member_init { "," member_init } "}" ;   (* at least one member *)
+fn parse_anon_struct_init(self state: &var ParserState) -> AnonStructInit {
+    panic;
+}
+
+// member_init = "." identifier "=" expression ;
+fn parse_member_init(self state: &var ParserState) -> MemberInit {
+    panic;
+}
+
+// lambda_expr = [ "|" capture { "," capture } "|" ] function ;
+fn parse_lambda_expr(self state: &var ParserState) -> LambdaExpr {
+    panic;
+}
+
+// capture = [ "&" [ "var" ] | "move" ] identifier ;
+fn parse_capture(self state: &var ParserState) -> Capture {
+    panic;
+}
+
+// if_expr = "if" "(" expression ")" if_branch [ "else" if_branch ] ;
+fn parse_if_expr(self state: &var ParserState) -> IfExpr {
+    panic;
+}
+
+// if_branch = stmt_block | expression ;   (* bare expression only in value position *)
+fn parse_if_branch(self state: &var ParserState) -> IfBranch {
+    panic;
+}
+
+// for_expr = "for" "(" expression { "," expression } ")"
+//            [ "|" capture { "," capture } "|" ]
+//            stmt_block [ "else" stmt_block ] ;
+fn parse_for_expr(self state: &var ParserState) -> ForExpr {
+    panic;
+}
+
+// while_expr = "while" "(" expression ")" stmt_block [ "else" stmt_block ] ;
+fn parse_while_expr(self state: &var ParserState) -> WhileExpr {
+    panic;
+}
+
+// match_expr = "match" "(" expression ")" "{"
+//               { ( expression | "else" ) [ "|" capture "|" ] match_arm }
+//               "}" [ "else" stmt_block ] ;
+fn parse_match_expr(self state: &var ParserState) -> MatchExpr {
+    panic;
+}
+
+// match_arm = stmt_block | expression terminator ;   (* bare expression only in value position *)
+fn parse_match_arm(self state: &var ParserState) -> MatchArmBody {
+    panic;
+}
+
+// comptime_expr = "#" ( postfix_expr | struct_type | enum_type ) ;
+fn parse_comptime_expr(self state: &var ParserState) -> ComptimeExpr {
     panic;
 }

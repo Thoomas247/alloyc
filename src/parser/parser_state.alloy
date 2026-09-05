@@ -1,4 +1,5 @@
 import std::option;
+import std::vector;
 
 import tokenizer::token;
 import tokenizer::token_kind;
@@ -12,81 +13,208 @@ pub type ParserState = struct {
     cursor: TokenCursor,
     alloc: &var NodeAllocator,
     diagnostics: &var Diagnostics,
-    src: &[u8]
+    src: &[u8],
+    contexts: Vector<Context> // innermost last
 };
+
+/* --- Iteration Functions --- */
 
 // Returns the current token without moving the cursor.
 pub fn peek(self state: &ParserState) -> Option<&Token> {
     return state.cursor.peek();
 }
 
-// Returns the token `offset` positions ahead. 0 for the current token.
+// Returns the token offset positions ahead and 0 is the current token.
 pub fn peek(self state: &ParserState, offset: u64) -> Option<&Token> {
     return state.cursor.peek(offset);
 }
 
-// Returns true if there are more tokens to read, false otherwise.
-pub fn has_next(self state: &ParserState) -> bool {
-    return state.cursor.has_next();
-}
-
-// Returns the current token and moves the cursor forward, or ::None if past the end.
+// Returns the current token and moves forward or None past the end.
 pub fn next(self state: &var ParserState) -> Option<&Token> {
     return state.cursor.next();
 }
 
-// Arena-allocates a node; use for a single-reference field.
-pub fn alloc<T>(self state: &var ParserState, value: T) -> &var T {
-    return &var state.alloc.alloc(value);
+// The current token kind or end_of_file once the input is spent.
+pub fn current_kind(self state: &ParserState) -> TokenKind {
+    return if (state.peek() is ::Some |&t|) t.kind else ::end_of_file;
 }
 
-// Arena-allocates a node list; use for an array field.
-pub fn alloc_array<T>(self state: &var ParserState, items: &[T]) -> &var [T] {
-    return &var state.alloc.alloc_array(&items);
-}
-
-// Returns the source text covered by a span.
-pub fn text(self state: &ParserState, span: Span) -> &[u8] {
-    return &state.src[span.start..span.end];
-}
-
-// An identifier is just its token's span.
-pub fn ident(self state: &ParserState, token: &Token) -> Ident {
-    return token.span as Ident;
-}
-
-// Records a diagnostic at the given span.
-pub fn error(self state: &var ParserState, span: Span, message: &[u8]) {
-    state.diagnostics.error(span, &message);
-}
-
-// The current token's span, or the 'end_of_file' token's span past the end.
+// The current token span or an empty span after the last consumed token.
 pub fn current_span(self state: &ParserState) -> Span {
     if (state.peek() is ::Some |&token|) {
         return token.span;
     }
 
-    panic "token stream exhausted without an end_of_file token";
+    return Span::empty(state.previous_end());
 }
 
-// The end offset of the last token consumed by 'next()'.
+// The end offset of the last consumed token.
 pub fn previous_end(self state: &ParserState) -> u64 {
     return state.cursor.previous_end;
 }
 
-// Allocates an error marker node covering 'span'.
+// True when the current token has the given kind.
+pub fn at(self state: &ParserState, kind: TokenKind) -> bool {
+    return state.current_kind() == kind;
+}
+
+// Consumes the current token if it has the given kind.
+// Use for optional parts and separators.
+pub fn eat(self state: &var ParserState, kind: TokenKind) -> bool {
+    if (!state.at(kind)) {
+        return false;
+    }
+
+    state.next();
+    return true;
+}
+
+// Asserts that the current token has the given kind and panics otherwise.
+pub fn assert(self state: &var ParserState, kind: TokenKind) {
+    if (!state.at(kind)) {
+        panic "assert saw the wrong token kind";
+    }
+
+    state.next();
+}
+
+/* --- Allocation Functions --- */
+
+// Arena allocates a node for a single reference field.
+pub fn alloc<T>(self state: &var ParserState, value: T) -> &var T {
+    return &var state.alloc.alloc(value);
+}
+
+// Arena allocates a node list for an array field.
+pub fn alloc_array<T>(self state: &var ParserState, items: &[T]) -> &var [T] {
+    return &var state.alloc.alloc_array(&items);
+}
+
+// An identifier is just its token span.
+pub fn ident(self state: &ParserState, token: &Token) -> Ident {
+    return token.span as Ident;
+}
+
+// The placeholder for a name that failed to parse.
+// An empty span at the current token so the start equals the end.
+pub fn missing_ident(self state: &ParserState) -> Ident {
+    return Span::empty(state.current_span().start) as Ident;
+}
+
+// The placeholder for a type that failed to parse.
+// An empty error type at the current token.
+pub fn missing_type(self state: &var ParserState) -> Type {
+    const span = Span::empty(state.current_span().start);
+    return Type { .span = span, .modifier = TypeModifier::None, .base = TypeBase::Error(state.error_node(span)) };
+}
+
+// Allocates an error marker node covering the span.
 pub fn error_node(self state: &var ParserState, span: Span) -> &ErrorNode {
     return &state.alloc(ErrorNode { .span = span });
 }
 
-// Use to require a specific token, reports and doesn't consume on mismatch.
-pub fn expect(self state: &var ParserState, kind: TokenKind, message: &[u8]) -> Option<&Token> {
-    if (state.peek() is ::Some |&token| && token.kind == kind) {
+/* --- Rule Bracketing --- */
+
+// Opens a rule by pushing its context and returns the start offset.
+pub fn enter(self state: &var ParserState, context: Context) -> u64 {
+    state.contexts.push(context);
+    return state.current_span().start;
+}
+
+// Closes a rule by popping its context and returns the node span.
+pub fn leave(self state: &var ParserState, start: u64) -> Span {
+    state.contexts.pop();
+    return Span { .start = start, .end = state.previous_end() };
+}
+
+// The innermost open rule or Module when none is open.
+fn current_context(self state: &ParserState) -> Context {
+    const count = state.contexts.length();
+    if (count == 0) {
+        return Context::Module;
+    }
+
+    return if (state.contexts.get(count - 1) is ::Some |&context|) context else Context::Module;
+}
+
+/* --- Diagnostic Functions --- */
+
+// Requires a token and consumes it on a match.
+// A miss is reported and not consumed so the caller recovers.
+pub fn expect(self state: &var ParserState, kind: TokenKind) -> Option<&Token> {
+    if (state.at(kind)) {
         return state.next();
     }
 
-    state.error(state.current_span(), &message);
+    state.expected(Expectation::Token(kind));
     return ::None;
+}
+
+// Requires an identifier like expect and returns it as an Ident.
+pub fn expect_ident(self state: &var ParserState) -> Option<Ident> {
+    if (state.at(TokenKind::identifier)) {
+        if (state.next() is ::Some |&token|) {
+            return ::Some(state.ident(&token));
+        }
+    }
+
+    state.expected(Expectation::Identifier);
+    return ::None;
+}
+
+// Requires a closing delimiter.
+// A miss also notes where the opener was.
+pub fn expect_closing(self state: &var ParserState, kind: TokenKind, opened: Span) -> Option<&Token> {
+    if (state.at(kind)) {
+        return state.next();
+    }
+
+    const note = Note { .span = opened, .message = "to match this opening delimiter" };
+    state.report_expected(state.current_span(), Expectation::Token(kind), &[note][..]);
+    return ::None;
+}
+
+// Reports an expectation at the current token without consuming.
+// Dispatchers call this when no alternative matches.
+pub fn expected(self state: &var ParserState, what: Expectation) {
+    const no_notes: &[Note] = [];
+    state.report_expected(state.current_span(), what, &no_notes);
+}
+
+// Records an Expected diagnostic tagged with the innermost context.
+// Every report goes through here so suppression lives in one place.
+// A repeat at the previous offset is dropped and past the cap only counted.
+fn report_expected(self state: &var ParserState, span: Span, what: Expectation, notes: &[Note]) {
+    if (state.diagnostics.entries.length() > 0 && span.start == state.diagnostics.last_error_start) {
+        return;
+    }
+
+    // errors recorded before the rest are only counted
+    if (state.diagnostics.entries.length() >= 20) {
+        state.diagnostics.suppressed += 1;
+        return;
+    }
+
+    const info = DiagnosticInfo::Expected({
+            .span = span,
+            .expected = what,
+            .found = state.current_kind(),
+            .context = state.current_context(),
+            .notes = &state.alloc_array(&notes)
+        });
+    state.diagnostics.error(&info);
+    state.diagnostics.last_error_start = span.start;
+}
+
+/* --- Recovery Functions --- */
+
+// Skips to a sync token then consumes trailing if that stopped the skip.
+// Call this only after consuming its leading token, so the enclosing loop always advances.
+pub fn recover(self state: &var ParserState, sync: &[TokenKind], trailing: TokenKind) {
+    state.synchronize(&sync);
+    if (state.at(trailing)) {
+        state.next();
+    }
 }
 
 fn matches_any(kind: &TokenKind, stop: &[TokenKind]) -> bool {
@@ -99,9 +227,9 @@ fn matches_any(kind: &TokenKind, stop: &[TokenKind]) -> bool {
     return false;
 }
 
-// Skip to the next 'stop' token (bracket-depth aware).
-// Caller must consume at least one token first, or this can't make progress.
-pub fn synchronize(self state: &var ParserState, stop: &[TokenKind]) {
+// Skips to the next stop token at bracket depth zero.
+// Also stops at end_of_file and at an unmatched closing bracket.
+fn synchronize(self state: &var ParserState, stop: &[TokenKind]) {
     var depth: u64 = 0;
 
     while (state.peek() is ::Some |&token|) {
