@@ -81,7 +81,13 @@ pub type InterfaceFn = struct {
     return_type: Option<&Type>
 };
 
-pub type Receiver = enum { Ref, RefVar, Ptr, PtrVar };
+pub type Receiver = enum {
+    Ref,
+    RefVar,
+    Ptr,
+    PtrVar,
+    Error: &ErrorNode
+};
 
 pub type InterfaceMarker = struct {
     span: Span,

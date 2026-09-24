@@ -19,6 +19,9 @@ pub type Context = enum {
     Module,
     ImportDecl,
     TypeDef,
+    InterfaceDef,
+    InterfaceFn,
+    FnDef
 };
 
 pub type Note = struct {

@@ -108,6 +108,34 @@ pub fn missing_type(self state: &var ParserState) -> Type {
     return Type { .span = span, .modifier = TypeModifier::None, .base = TypeBase::Error(state.error_node(span)) };
 }
 
+// The placeholder for a receiver that failed to parse.
+pub fn missing_receiver(self state: &var ParserState) -> Receiver {
+    const span = Span::empty(state.current_span().start);
+    return Receiver::Error(state.error_node(span));
+}
+
+// The placeholder for a function that failed to parse.
+pub fn missing_function(self state: &var ParserState) -> Function {
+    const span = Span::empty(state.current_span().start);
+
+    return Function {
+        .span = span,
+        .params = [],
+        .return_type = ::None,
+        .body = &state.alloc(state.missing_stmt_block())
+    };
+}
+
+// The placeholder for a statement block that failed to parse.
+pub fn missing_stmt_block(self state: &var ParserState) -> StmtBlock {
+    const span = Span::empty(state.current_span().start);
+
+    return StmtBlock {
+        .span = span,
+        .statements = []
+    };
+}
+
 // Allocates an error marker node covering the span.
 pub fn error_node(self state: &var ParserState, span: Span) -> &ErrorNode {
     return &state.alloc(ErrorNode { .span = span });
@@ -207,6 +235,12 @@ fn report_expected(self state: &var ParserState, span: Span, what: Expectation, 
 }
 
 /* --- Recovery Functions --- */
+
+// Skips to a sync token.
+// Call this only after consuming its leading token, so the enclosing loop always advances.
+pub fn recover(self state: &var ParserState, sync: &[TokenKind]) {
+    state.synchronize(&sync);
+}
 
 // Skips to a sync token then consumes trailing if that stopped the skip.
 // Call this only after consuming its leading token, so the enclosing loop always advances.

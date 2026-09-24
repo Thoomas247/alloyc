@@ -22,22 +22,100 @@ pub fn parse(tokens: &Vector<Token>, src: &[u8], diagnostics: &var Diagnostics, 
     return &state.parse_module();
 }
 
+macro definition_sync() -> &[TokenKind] {
+    return [
+        TokenKind::op_semicolon,
+        TokenKind::kw_fn,
+        TokenKind::kw_type,
+        TokenKind::kw_pub,
+        TokenKind::kw_exp,
+        TokenKind::kw_macro,
+        TokenKind::kw_interface,
+        TokenKind::kw_extern
+    ];
+}
+
+macro import_sync() -> &[TokenKind] {
+    var sync = Vector::empty<TokenKind>();
+
+    for (#definition_sync()) |def_sync| {
+        sync.push(def_sync);
+    }
+
+    sync.push(TokenKind::kw_import);
+
+    return &sync.view();
+}
+
+// "<" type_param { "," type_param } ">"
+fn parse_type_param_list(self state: &var ParserState, dst: &var Vector<TypeParam>) -> bool {
+    const open = state.current_span();
+    state.assert(::op_angle_left);
+
+    dst.push(state.parse_type_param());
+    while (state.eat(::op_comma)) {
+        dst.push(state.parse_type_param());
+    }
+
+    if (state.expect_closing(::op_angle_right, open) is ::None) {
+        return false;
+    }
+
+    return true;
+}
+
+// "<" type { "," type } ">"
+fn parse_type_list(self state: &var ParserState, dst: &var Vector<Type>) -> bool {
+    const open = state.current_span();
+    state.assert(::op_angle_left);
+
+    dst.push(state.parse_type());
+    while (state.eat(::op_comma)) {
+        dst.push(state.parse_type());
+    }
+
+    if (state.expect_closing(::op_angle_right, open) is ::None) {
+        return false;
+    }
+
+    return true;
+}
+
+// identifier { "::" identifier }
+fn parse_path(self state: &var ParserState, dst: &var Vector<Ident>) -> bool {
+    var ok = true;
+
+    if (state.expect_ident() is ::Some |id|) {
+        dst.push(id);
+    } else {
+        ok = false;
+    }
+
+    while (ok && state.eat(::op_colon_colon)) {
+        if (state.expect_ident() is ::Some |id|) {
+            dst.push(id);
+        } else {
+            ok = false;
+        }
+    }
+
+    return ok;
+}
+
 // module = { import_decl } { definition } EOF
 fn parse_module(self state: &var ParserState) -> &Module {
     const start = state.enter(::Module);
 
     var imports = Vector::empty<ImportDecl>();
-    var definitions = Vector::empty<Definition>();
-
     while (state.at(::kw_import)) {
         imports.push(state.parse_import_decl());
     }
 
+    var definitions = Vector::empty<Definition>();
     while (!state.at(::end_of_file)) {
         const before = state.cursor.index;
         definitions.push(state.parse_definition());
         if (state.cursor.index == before) {
-            // the dispatcher reported the token so only step past it
             state.next();
         }
     }
@@ -54,25 +132,14 @@ fn parse_import_decl(self state: &var ParserState) -> ImportDecl {
     const start = state.enter(::ImportDecl);
     var ok = true;
 
-    var path = Vector::empty<Ident>();
-    var alias: Option<Ident> = ::None;
-
     state.assert(::kw_import);
 
-    if (state.expect_ident() is ::Some |id|) {
-        path.push(id);
-    } else {
+    var path = Vector::empty<Ident>();
+    if (!state.parse_path(&var path)) {
         ok = false;
     }
 
-    while (ok && state.eat(::op_colon_colon)) {
-        if (state.expect_ident() is ::Some |id|) {
-            path.push(id);
-        } else {
-            ok = false;
-        }
-    }
-
+    var alias: Option<Ident> = ::None;
     if (ok && state.eat(::kw_as)) {
         if (state.expect_ident() is ::Some |id|) {
             alias = ::Some(id);
@@ -86,18 +153,7 @@ fn parse_import_decl(self state: &var ParserState) -> ImportDecl {
     }
 
     if (!ok) {
-        const sync = &[
-            TokenKind::op_semicolon,
-            TokenKind::kw_import,
-            TokenKind::kw_fn,
-            TokenKind::kw_type,
-            TokenKind::kw_pub,
-            TokenKind::kw_exp,
-            TokenKind::kw_macro,
-            TokenKind::kw_interface,
-            TokenKind::kw_extern
-        ][..];
-        state.recover(&sync, ::op_semicolon);
+        state.recover(#import_sync(), ::op_semicolon);
     }
 
     return ImportDecl {
@@ -122,21 +178,10 @@ fn parse_definition(self state: &var ParserState) -> Definition {
         ::kw_interface DefinitionKind::InterfaceDef(&state.alloc(state.parse_interface_def()));
         ::kw_macro DefinitionKind::MacroDef(&state.alloc(state.parse_macro_def()));
         else {
-            state.expected(Expectation::Definition);
-
-            const sync = &[
-                TokenKind::op_semicolon,
-                TokenKind::kw_fn,
-                TokenKind::kw_type,
-                TokenKind::kw_pub,
-                TokenKind::kw_exp,
-                TokenKind::kw_macro,
-                TokenKind::kw_interface,
-                TokenKind::kw_extern
-            ][..];
+            state.expected(::Definition);
 
             state.next();
-            state.recover(&sync, ::op_semicolon);
+            state.recover(#definition_sync(), ::op_semicolon);
 
             yield DefinitionKind::Error(&state.error_node(Span { .start = start, .end = state.previous_end() }));
         }
@@ -161,16 +206,8 @@ fn parse_type_def(self state: &var ParserState) -> TypeDef {
     };
 
     var type_params = Vector::empty<TypeParam>();
-    if (ok && state.eat(::op_angle_left)) {
-        type_params.push(state.parse_type_param());
-
-        while (state.eat(::op_comma)) {
-            type_params.push(state.parse_type_param());
-        }
-
-        if (state.expect(::op_angle_right) is ::None) {
-            ok = false;
-        }
+    if (ok && state.at(::op_angle_left)) {
+        ok = state.parse_type_param_list(&var type_params);
     }
 
     var markers = Vector::empty<InterfaceMarker>();
@@ -192,6 +229,10 @@ fn parse_type_def(self state: &var ParserState) -> TypeDef {
         ok = false;
     }
 
+    if (!ok) {
+        state.recover(#definition_sync(), ::op_semicolon);
+    }
+
     return TypeDef {
         .span = state.leave(start),
         .name = name,
@@ -203,39 +244,203 @@ fn parse_type_def(self state: &var ParserState) -> TypeDef {
 
 // interface_def = "interface" identifier [ "<" type_param { "," type_param } ">" ] "{" { interface_fn } "}" ;
 fn parse_interface_def(self state: &var ParserState) -> InterfaceDef {
-    /*
-    pub type InterfaceDef = struct {
-        span: Span,
-        name: Ident,
-        type_params: &[TypeParam],
-        functions: &[InterfaceFn]
-    };
-    */
-
-    const start = state.enter(::TypeDef);
+    const start = state.enter(::InterfaceDef);
     var ok = true;
 
-    panic;
+    state.assert(::kw_interface);
+    const name = if (state.expect_ident() is ::Some |id|) id else {
+        ok = false;
+        yield state.missing_ident();
+    };
+
+    var type_params = Vector::empty<TypeParam>();
+    if (ok && state.at(::op_angle_left)) {
+        ok = state.parse_type_param_list(&var type_params);
+    }
+
+    const brace = if (ok) state.expect(::op_brace_left) else ::None;
+    if (brace is ::None) {
+        ok = false;
+    }
+
+    var interface_fns = Vector::empty<InterfaceFn>();
+    while (ok && !state.at(::op_brace_right) && !state.at(::end_of_file)) {
+        const before = state.cursor.index;
+        interface_fns.push(state.parse_interface_fn());
+        if (state.cursor.index == before) {
+            state.next();
+        }
+    }
+
+    if (brace is ::Some |open|) {
+        state.expect_closing(::op_brace_right, open.span);
+    }
+
+    if (!ok) {
+        state.recover(#definition_sync(), ::op_semicolon);
+    }
+
+    return InterfaceDef {
+        .span = state.leave(start),
+        .name = name,
+        .type_params = &state.alloc_array(&type_params.view()),
+        .functions = &state.alloc_array(&interface_fns.view())
+    };
 }
 
 // interface_fn = "fn" identifier "(" receiver { "," param } ")" [ "->" type ] terminator ;
 fn parse_interface_fn(self state: &var ParserState) -> InterfaceFn {
-    panic;
+    const start = state.enter(::InterfaceFn);
+    var ok = true;
+
+    if (state.expect(::kw_fn) is ::None) {
+        ok = false;
+    }
+
+    const name = if (ok && state.expect_ident() is ::Some |id|) id else {
+        ok = false;
+        yield state.missing_ident();
+    };
+
+    const paren = if (ok) state.expect(::op_parenthesis_left) else ::None;
+    if (paren is ::None) {
+        ok = false;
+    }
+
+    const receiver = if (ok) state.parse_receiver() else state.missing_receiver();
+
+    var params = Vector::empty<Param>();
+    while (ok && state.eat(::op_comma)) {
+        params.push(state.parse_param());
+    }
+
+    if (paren is ::Some |open| && state.expect_closing(::op_parenthesis_right, open.span) is ::None) {
+        ok = false;
+    }
+
+    var return_type: Option<&Type> = ::None;
+    if (ok && state.eat(::op_arrow)) {
+        return_type = ::Some(&state.alloc(state.parse_type()));
+    }
+
+    if (ok && state.expect(::op_semicolon) is ::None) {
+        ok = false;
+    }
+
+    if (!ok) {
+        state.recover(&[TokenKind::op_semicolon, TokenKind::kw_fn][..], ::op_semicolon);
+    }
+
+    return InterfaceFn {
+        .span = state.leave(start),
+        .name = name,
+        .receiver = receiver,
+        .params = &state.alloc_array(&params.view()),
+        .return_type = return_type
+    };
 }
 
 // receiver = "self" ":" ( "&" | "&" "var" | "*" | "*" "var" ) ;
 fn parse_receiver(self state: &var ParserState) -> Receiver {
-    panic;
+    var ok = true;
+
+    if (state.expect(::kw_self) is ::None) {
+        ok = false;
+    }
+
+    if (ok && state.expect(::op_colon) is ::None) {
+        ok = false;
+    }
+
+    if (ok && state.eat(::op_ampersand)) {
+        if (state.eat(::kw_var)) {
+            return Receiver::RefVar;
+        }
+
+        return Receiver::Ref;
+    } else if (ok && state.eat(::op_asterisk)) {
+        if (state.eat(::kw_var)) {
+            return Receiver::PtrVar;
+        }
+
+        return Receiver::Ptr;
+    } else {
+        ok = false;
+    }
+
+    if (!ok) {
+        state.recover(&[TokenKind::op_comma, TokenKind::op_parenthesis_right][..]);
+    }
+
+    return state.missing_receiver();
 }
 
-// interface_marker = identifier [ "<" type { "," type } ">" ] ;
+// interface_marker = identifier { "::" identifier } [ "<" type { "," type } ">" ] ;
 fn parse_interface_marker(self state: &var ParserState) -> InterfaceMarker {
-    panic;
+    const start = state.current_span().start;
+    var ok = true;
+
+    var path = Vector::empty<Ident>();
+    if (!state.parse_path(&var path)) {
+        ok = false;
+    }
+
+    var types = Vector::empty<Type>();
+    if (ok && state.at(::op_angle_left)) {
+        ok = state.parse_type_list(&var types);
+    }
+
+    if (!ok) {
+        state.recover(&[TokenKind::op_comma, TokenKind::op_equal][..]);
+    }
+
+    return InterfaceMarker {
+        .span = Span { .start = start, .end = state.previous_end() },
+        .path = &state.alloc_array(&path.view()),
+        .type_args = &state.alloc_array(&types.view())
+    };
 }
 
 // fn_def = "fn" [ identifier "::" ] identifier [ "<" type_param { "," type_param } ">" ] function ;
 fn parse_fn_def(self state: &var ParserState) -> FnDef {
-    panic;
+    const start = state.enter(::FnDef);
+    var ok = true;
+
+    const first_identifier = if (state.expect_ident() is ::Some |id|) id else {
+        ok = false;
+        yield state.missing_ident();
+    };
+
+    var qualifier: Option<Ident> = ::None;
+    const name = if (ok && state.peek() is ::Some |t| && t.kind == ::op_colon_colon) {
+        qualifier = ::Some(first_identifier);
+
+        yield if (state.expect_ident() is ::Some |id|) id else {
+            ok = false;
+            yield state.missing_ident();
+        };
+    } else first_identifier;
+
+    var type_params = Vector::empty<TypeParam>();
+    if (ok && state.at(::op_angle_left)) {
+        if (!state.parse_type_param_list(&var type_params)) {
+            ok = false;
+        }
+    }
+
+    const function = if (ok) state.parse_function() else state.missing_function();
+
+    if (!ok) {
+        state.recover(#definition_sync(), ::op_semicolon);
+    }
+
+    return FnDef {
+        .span = state.leave(start),
+        .qualifier = qualifier,
+        .name = name,
+        .type_params = &state.alloc_array(&type_params.view()),
+        .function = &state.alloc(function)
+    };
 }
 
 // macro_def = "macro" identifier "(" [ macro_param { "," macro_param } ] ")" "->" type
