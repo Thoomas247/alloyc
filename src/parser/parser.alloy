@@ -428,9 +428,7 @@ fn parse_fn_def(self state: &var ParserState) -> FnDef {
 
     var type_params = Vector::empty<TypeParam>();
     if (ok && state.at(::op_angle_left)) {
-        if (!state.parse_type_param_list(&var type_params)) {
-            ok = false;
-        }
+        ok = state.parse_type_param_list(&var type_params);
     }
 
     const function = if (ok) state.parse_function() else state.missing_function();
@@ -577,24 +575,132 @@ fn parse_extern_def(self state: &var ParserState) -> ExternDef {
 //               | param { "," param } [ "," "..." ]
 //               | "..." ;
 fn parse_extern_params(self state: &var ParserState) -> ExternParams {
-    panic;
+    if (state.at(::op_parenthesis_right)) {
+        // no params
+        return ExternParams::Fixed([]);
+    }
+
+    if (state.eat(::op_ellipsis)) {
+        // only variadic
+        return ExternParams::Variadic([]);
+    }
+
+    var is_variadic = false;
+    var params = Vector::empty<Param>();
+
+    params.push(state.parse_param());
+    while (state.eat(::op_comma)) {
+        if (state.eat(::op_ellipsis)) {
+            is_variadic = true;
+            break;
+        }
+
+        params.push(state.parse_param());
+    }
+
+    const allocated = &state.alloc_array(&params.view());
+
+    return if (is_variadic) ExternParams::Variadic(&allocated) else ExternParams::Fixed(&allocated);
 }
 
 // type_param = identifier [ ":" interface_marker ] ;
 fn parse_type_param(self state: &var ParserState) -> TypeParam {
-    panic;
+    const start = state.current_span().start;
+    var ok = true;
+
+    const name = if (state.expect_ident() is ::Some |id|) id else {
+        ok = false;
+        yield state.missing_ident();
+    };
+
+    var constraint: Option<&InterfaceMarker> = ::None;
+    if (ok && state.eat(::op_colon)) {
+        constraint = ::Some(&state.alloc(state.parse_interface_marker()));
+    }
+
+    if (!ok) {
+        state.recover(&[TokenKind::op_comma, TokenKind::op_parenthesis_right][..]);
+    }
+
+    return TypeParam {
+        .span = Span { .start = start, .end = state.previous_end() },
+        .name = name,
+        .constraint = constraint
+    };
 }
 
 /* --- Functions --- */
 
 // function = "(" [ param { "," param } ] ")" [ "->" type ] stmt_block ;
 fn parse_function(self state: &var ParserState) -> Function {
-    panic;
+    const start = state.enter(::Function);
+    var ok = true;
+
+    const paren = state.expect(::op_parenthesis_left);
+    if (paren is ::None) {
+        ok = false;
+    }
+
+    var params = Vector::empty<Param>();
+    if (ok && !state.at(::op_parenthesis_right)) {
+        params.push(state.parse_param());
+
+        while (ok && state.eat(::op_comma)) {
+            params.push(state.parse_param());
+        }
+    }
+
+    if (paren is ::Some |open| && state.expect_closing(::op_parenthesis_right, open.span) is ::None) {
+        ok = false;
+    }
+
+    var return_type: Option<&Type> = ::None;
+    if (ok && state.eat(::op_arrow)) {
+        return_type = ::Some(&state.alloc(state.parse_type()));
+    }
+
+    const body = if (ok) state.parse_stmt_block() else state.missing_stmt_block();
+
+    if (!ok) {
+        state.recover(#definition_sync(), ::op_brace_left);
+    }
+
+    return Function {
+        .span = state.leave(start),
+        .params = &state.alloc_array(&params.view()),
+        .return_type = return_type,
+        .body = &state.alloc(body)
+    };
 }
 
 // param = [ "self" ] identifier ":" type ;
 fn parse_param(self state: &var ParserState) -> Param {
-    panic;
+    const start = state.current_span().start;
+    var ok = true;
+
+    var is_self = state.eat(::kw_self);
+
+    const name = if (state.expect_ident() is ::Some |id|) id else {
+        ok = false;
+        yield state.missing_ident();
+    };
+
+    if (ok && state.expect(::op_colon) is ::None) {
+        ok = false;
+    }
+
+    const type_annotation = if (ok) state.parse_type() else state.missing_type();
+
+    if (!ok) {
+        state.recover(&[TokenKind::op_comma, TokenKind::op_parenthesis_right][..]);
+    }
+
+    return Param {
+        .span = Span { .start = start, .end = state.previous_end() },
+        .is_self = is_self,
+        .name = name,
+        .type_annotation = &state.alloc(type_annotation)
+    };
 }
 
 /* --- Types --- */
