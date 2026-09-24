@@ -14,7 +14,8 @@ pub type ParserState = struct {
     alloc: &var NodeAllocator,
     diagnostics: &var Diagnostics,
     src: &[u8],
-    contexts: Vector<Context> // innermost last
+    contexts: Vector<Context>, // innermost last
+    is_std_lib: bool
 };
 
 /* --- Iteration Functions --- */

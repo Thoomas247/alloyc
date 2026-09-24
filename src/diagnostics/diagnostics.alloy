@@ -21,7 +21,9 @@ pub type Context = enum {
     TypeDef,
     InterfaceDef,
     InterfaceFn,
-    FnDef
+    FnDef,
+    MacroDef,
+    ExternDef
 };
 
 pub type Note = struct {

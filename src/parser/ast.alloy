@@ -127,7 +127,8 @@ pub type ExternDef = struct {
 // Whether an extern fn accepts extra C-variadic args.
 pub type ExternParams = enum {
     Fixed: &[Param],
-    Variadic: &[Param]
+    Variadic: &[Param],
+    Error: &ErrorNode
 };
 
 pub type TypeParam = struct {

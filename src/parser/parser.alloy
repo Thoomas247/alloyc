@@ -16,7 +16,8 @@ pub fn parse(tokens: &Vector<Token>, src: &[u8], diagnostics: &var Diagnostics, 
         .alloc = &var allocator,
         .diagnostics = &var diagnostics,
         .src = &src,
-        .contexts = Vector::empty()
+        .contexts = Vector::empty(),
+        .is_std_lib = false // TODO: Set real value.
     };
 
     return &state.parse_module();
@@ -200,6 +201,7 @@ fn parse_type_def(self state: &var ParserState) -> TypeDef {
     var ok = true;
 
     state.assert(::kw_type);
+
     const name = if (state.expect_ident() is ::Some |id|) id else {
         ok = false;
         yield state.missing_ident();
@@ -248,6 +250,7 @@ fn parse_interface_def(self state: &var ParserState) -> InterfaceDef {
     var ok = true;
 
     state.assert(::kw_interface);
+
     const name = if (state.expect_ident() is ::Some |id|) id else {
         ok = false;
         yield state.missing_ident();
@@ -406,13 +409,15 @@ fn parse_fn_def(self state: &var ParserState) -> FnDef {
     const start = state.enter(::FnDef);
     var ok = true;
 
+    state.assert(::kw_fn);
+
     const first_identifier = if (state.expect_ident() is ::Some |id|) id else {
         ok = false;
         yield state.missing_ident();
     };
 
     var qualifier: Option<Ident> = ::None;
-    const name = if (ok && state.peek() is ::Some |t| && t.kind == ::op_colon_colon) {
+    const name = if (ok && state.eat(::op_colon_colon)) {
         qualifier = ::Some(first_identifier);
 
         yield if (state.expect_ident() is ::Some |id|) id else {
@@ -446,17 +451,126 @@ fn parse_fn_def(self state: &var ParserState) -> FnDef {
 // macro_def = "macro" identifier "(" [ macro_param { "," macro_param } ] ")" "->" type
 //                   ( stmt_block | terminator ) ;
 fn parse_macro_def(self state: &var ParserState) -> MacroDef {
-    panic;
+    const start = state.enter(::MacroDef);
+    var ok = true;
+
+    state.assert(::kw_macro);
+
+    const name = if (state.expect_ident() is ::Some |id|) id else {
+        ok = false;
+        yield state.missing_ident();
+    };
+
+    const paren = if (ok) state.expect(::op_parenthesis_left) else ::None;
+    if (paren is ::None) {
+        ok = false;
+    }
+
+    var params = Vector::empty<MacroParam>();
+    if (ok && !state.at(::op_parenthesis_right)) {
+        params.push(state.parse_macro_param());
+
+        while (ok && state.eat(::op_comma)) {
+            params.push(state.parse_macro_param());
+        }
+    }
+
+    if (paren is ::Some |open| && state.expect_closing(::op_parenthesis_right, open.span) is ::None) {
+        ok = false;
+    }
+
+    if (ok && state.expect(::op_arrow) is ::None) {
+        ok = false;
+    }
+
+    const return_type = if (ok) state.parse_type() else state.missing_type();
+
+    var body: Option<&StmtBlock> = ::None;
+    if (ok && (!state.is_std_lib || !state.eat(::op_semicolon))) {
+        body = ::Some(&state.alloc(state.parse_stmt_block()));
+    }
+
+    if (!ok) {
+        state.recover(#definition_sync(), ::op_semicolon);
+    }
+
+    return MacroDef {
+        .span = state.leave(start),
+        .name = name,
+        .params = &state.alloc_array(&params.view()),
+        .return_type = &state.alloc(return_type),
+        .body = body
+    };
 }
 
 // macro_param = identifier [ ":" type ] ;
 fn parse_macro_param(self state: &var ParserState) -> MacroParam {
-    panic;
+    const start = state.current_span().start;
+    var ok = true;
+
+    const name = if (state.expect_ident() is ::Some |id|) id else {
+        ok = false;
+        yield state.missing_ident();
+    };
+
+    var type_annotation: Option<&Type> = ::None;
+    if (ok && state.eat(::op_colon)) {
+        type_annotation = ::Some(&state.alloc(state.parse_type()));
+    }
+
+    if (!ok) {
+        state.recover(&[TokenKind::op_comma, TokenKind::op_parenthesis_right][..]);
+    }
+
+    return MacroParam {
+        .span = Span { .start = start, .end = state.previous_end() },
+        .name = name,
+        .type_annotation = type_annotation
+    };
 }
 
 // extern_def = "extern" identifier "(" extern_params ")" [ "->" type ] terminator ;
 fn parse_extern_def(self state: &var ParserState) -> ExternDef {
-    panic;
+    const start = state.enter(::ExternDef);
+    var ok = true;
+
+    state.assert(::kw_extern);
+
+    const name = if (state.expect_ident() is ::Some |id|) id else {
+        ok = false;
+        yield state.missing_ident();
+    };
+
+    const paren = if (ok) state.expect(::op_parenthesis_left) else ::None;
+    if (paren is ::None) {
+        ok = false;
+    }
+
+    const params = if (ok) state.parse_extern_params() else ExternParams::Error(state.error_node(state.current_span()));
+
+    if (paren is ::Some |open| && state.expect_closing(::op_parenthesis_right, open.span) is ::None) {
+        ok = false;
+    }
+
+    var return_type: Option<&Type> = ::None;
+    if (ok && state.eat(::op_arrow)) {
+        return_type = ::Some(&state.alloc(state.parse_type()));
+    }
+
+    if (ok && state.expect(::op_semicolon) is ::None) {
+        ok = false;
+    }
+
+    if (!ok) {
+        state.recover(#definition_sync(), ::op_semicolon);
+    }
+
+    return ExternDef {
+        .span = state.leave(start),
+        .name = name,
+        .params = params,
+        .return_type = return_type
+    };
 }
 
 // extern_params = /* empty */
