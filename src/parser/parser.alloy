@@ -17,7 +17,10 @@ pub fn parse(tokens: &Vector<Token>, src: &[u8], diagnostics: &var Diagnostics, 
         .diagnostics = &var diagnostics,
         .src = &src,
         .contexts = Vector::empty(),
-        .is_std_lib = false // TODO: Set real value.
+        .is_std_lib = false, // TODO: Set real value.
+        .split_head = Token { .kind = ::end_of_file, .span = Span::empty(0) },
+        .split_tail = Token { .kind = ::end_of_file, .span = Span::empty(0) },
+        .has_split = false
     };
 
     return &state.parse_module();
@@ -184,12 +187,12 @@ fn parse_definition(self state: &var ParserState) -> Definition {
             state.next();
             state.recover(#definition_sync(), ::op_semicolon);
 
-            yield DefinitionKind::Error(&state.error_node(Span { .start = start, .end = state.previous_end() }));
+            yield DefinitionKind::Error(&state.error_node(state.span_from(start)));
         }
     };
 
     return Definition {
-        .span = Span { .start = start, .end = state.previous_end() },
+        .span = state.span_from(start),
         .visibility = visibility,
         .kind = kind
     };
@@ -368,11 +371,13 @@ fn parse_receiver(self state: &var ParserState) -> Receiver {
 
         return Receiver::Ptr;
     } else {
+        state.expected(::ReceiverKind);
+
         ok = false;
     }
 
     if (!ok) {
-        state.recover(&[TokenKind::op_comma, TokenKind::op_parenthesis_right][..]);
+        state.recover(&[::op_comma, ::op_parenthesis_right][..]);
     }
 
     return state.missing_receiver();
@@ -394,11 +399,11 @@ fn parse_interface_marker(self state: &var ParserState) -> InterfaceMarker {
     }
 
     if (!ok) {
-        state.recover(&[TokenKind::op_comma, TokenKind::op_equal][..]);
+        state.recover(&[::op_comma, ::op_equal, ::op_angle_right, ::op_semicolon][..]);
     }
 
     return InterfaceMarker {
-        .span = Span { .start = start, .end = state.previous_end() },
+        .span = state.span_from(start),
         .path = &state.alloc_array(&path.view()),
         .type_args = &state.alloc_array(&types.view())
     };
@@ -521,7 +526,7 @@ fn parse_macro_param(self state: &var ParserState) -> MacroParam {
     }
 
     return MacroParam {
-        .span = Span { .start = start, .end = state.previous_end() },
+        .span = state.span_from(start),
         .name = name,
         .type_annotation = type_annotation
     };
@@ -544,7 +549,7 @@ fn parse_extern_def(self state: &var ParserState) -> ExternDef {
         ok = false;
     }
 
-    const params = if (ok) state.parse_extern_params() else ExternParams::Error(state.error_node(state.current_span()));
+    const params = if (ok) state.parse_extern_params() else state.missing_extern_params();
 
     if (paren is ::Some |open| && state.expect_closing(::op_parenthesis_right, open.span) is ::None) {
         ok = false;
@@ -619,11 +624,11 @@ fn parse_type_param(self state: &var ParserState) -> TypeParam {
     }
 
     if (!ok) {
-        state.recover(&[TokenKind::op_comma, TokenKind::op_parenthesis_right][..]);
+        state.recover(&[::op_comma, ::op_parenthesis_right, ::op_angle_right][..]);
     }
 
     return TypeParam {
-        .span = Span { .start = start, .end = state.previous_end() },
+        .span = state.span_from(start),
         .name = name,
         .constraint = constraint
     };
@@ -662,7 +667,7 @@ fn parse_function(self state: &var ParserState) -> Function {
     const body = if (ok) state.parse_stmt_block() else state.missing_stmt_block();
 
     if (!ok) {
-        state.recover(#definition_sync(), ::op_brace_left);
+        state.recover(#definition_sync());
     }
 
     return Function {
@@ -678,7 +683,7 @@ fn parse_param(self state: &var ParserState) -> Param {
     const start = state.current_span().start;
     var ok = true;
 
-    var is_self = state.eat(::kw_self);
+    const is_self = state.eat(::kw_self);
 
     const name = if (state.expect_ident() is ::Some |id|) id else {
         ok = false;
@@ -696,7 +701,7 @@ fn parse_param(self state: &var ParserState) -> Param {
     }
 
     return Param {
-        .span = Span { .start = start, .end = state.previous_end() },
+        .span = state.span_from(start),
         .is_self = is_self,
         .name = name,
         .type_annotation = &state.alloc(type_annotation)
@@ -707,6 +712,11 @@ fn parse_param(self state: &var ParserState) -> Param {
 
 // type = type_modifier ( base_type | type ) ;
 fn parse_type(self state: &var ParserState) -> Type {
+    const start = state.enter(::Type);
+    var ok = true;
+
+    const type_modifier = state.parse_type_modifier();
+
     panic;
 }
 

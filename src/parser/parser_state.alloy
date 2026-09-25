@@ -15,29 +15,100 @@ pub type ParserState = struct {
     diagnostics: &var Diagnostics,
     src: &[u8],
     contexts: Vector<Context>, // innermost last
-    is_std_lib: bool
+    is_std_lib: bool,
+    split_head: Token, // the '>' taken off a split token
+    split_tail: Token, // what is left of it and the current token while has_split
+    has_split: bool
 };
 
 /* --- Iteration Functions --- */
 
 // Returns the current token without moving the cursor.
 pub fn peek(self state: &ParserState) -> Option<&Token> {
-    return state.cursor.peek();
+    return state.peek(0);
 }
 
 // Returns the token offset positions ahead and 0 is the current token.
 pub fn peek(self state: &ParserState, offset: u64) -> Option<&Token> {
-    return state.cursor.peek(offset);
+    if (!state.has_split) {
+        return state.cursor.peek(offset);
+    }
+
+    if (offset == 0) {
+        return ::Some(&state.split_tail);
+    }
+
+    return state.cursor.peek(offset - 1);
 }
 
 // Returns the current token and moves forward or None past the end.
 pub fn next(self state: &var ParserState) -> Option<&Token> {
-    return state.cursor.next();
+    if (!state.has_split) {
+        return state.cursor.next();
+    }
+
+    state.has_split = false;
+    state.cursor.previous_end = state.split_tail.span.end;
+    return ::Some(&state.split_tail);
+}
+
+// Consumes the current token as kind.
+// A '>' asked of '>>', '>=' or '>>=' splits it and leaves the rest current.
+fn take(self state: &var ParserState, kind: TokenKind) -> Option<&Token> {
+    const found = state.current_kind();
+    if (found == kind) {
+        return state.next();
+    }
+
+    const rest = if (angle_remainder(found) is ::Some |r|) r else {
+        panic "take saw a token it cannot split";
+    };
+
+    const start = state.current_span().start;
+    const end = state.current_span().end;
+    state.next();
+
+    state.split_head = Token { .kind = ::op_angle_right, .span = Span { .start = start, .end = start + 1 } };
+    state.split_tail = Token { .kind = rest, .span = Span { .start = start + 1, .end = end } };
+    state.has_split = true;
+    state.cursor.previous_end = start + 1;
+    return ::Some(&state.split_head);
+}
+
+// What is left of a token after a leading '>' is taken off it.
+fn angle_remainder(kind: TokenKind) -> Option<TokenKind> {
+    if (kind == ::op_shift_right) {
+        return ::Some(TokenKind::op_angle_right);
+    }
+
+    if (kind == ::op_angle_right_equal) {
+        return ::Some(TokenKind::op_equal);
+    }
+
+    if (kind == ::op_shift_right_equal) {
+        return ::Some(TokenKind::op_angle_right_equal);
+    }
+
+    return ::None;
+}
+
+// True when found can be consumed as wanted, splitting if needed.
+fn matches(found: TokenKind, wanted: TokenKind) -> bool {
+    if (found == wanted) {
+        return true;
+    }
+
+    return wanted == ::op_angle_right && angle_remainder(found) is ::Some;
 }
 
 // The current token kind or end_of_file once the input is spent.
 pub fn current_kind(self state: &ParserState) -> TokenKind {
     return if (state.peek() is ::Some |&t|) t.kind else ::end_of_file;
+}
+
+// The span from start to the end of the previous token.
+pub fn span_from(self state: &ParserState, start: u64) -> Span {
+    return Span { .start = start, .end = state.previous_end() };
 }
 
 // The current token span or an empty span after the last consumed token.
@@ -55,8 +126,9 @@ pub fn previous_end(self state: &ParserState) -> u64 {
 }
 
 // True when the current token has the given kind.
+// A '>' also matches '>>', '>=' and '>>=' so dispatch operators on current_kind.
 pub fn at(self state: &ParserState, kind: TokenKind) -> bool {
-    return state.current_kind() == kind;
+    return matches(state.current_kind(), kind);
 }
 
 // Consumes the current token if it has the given kind.
@@ -66,7 +138,7 @@ pub fn eat(self state: &var ParserState, kind: TokenKind) -> bool {
         return false;
     }
 
-    state.next();
+    state.take(kind);
     return true;
 }
 
@@ -76,7 +148,7 @@ pub fn assert(self state: &var ParserState, kind: TokenKind) {
         panic "assert saw the wrong token kind";
     }
 
-    state.next();
+    state.take(kind);
 }
 
 /* --- Allocation Functions --- */
@@ -127,6 +199,12 @@ pub fn missing_function(self state: &var ParserState) -> Function {
     };
 }
 
+// The placeholder for an extern param list that failed to parse.
+pub fn missing_extern_params(self state: &var ParserState) -> ExternParams {
+    const span = Span::empty(state.current_span().start);
+    return ExternParams::Error(state.error_node(span));
+}
+
 // The placeholder for a statement block that failed to parse.
 pub fn missing_stmt_block(self state: &var ParserState) -> StmtBlock {
     const span = Span::empty(state.current_span().start);
@@ -172,7 +250,7 @@ fn current_context(self state: &ParserState) -> Context {
 // A miss is reported and not consumed so the caller recovers.
 pub fn expect(self state: &var ParserState, kind: TokenKind) -> Option<&Token> {
     if (state.at(kind)) {
-        return state.next();
+        return state.take(kind);
     }
 
     state.expected(Expectation::Token(kind));
@@ -195,7 +273,7 @@ pub fn expect_ident(self state: &var ParserState) -> Option<Ident> {
 // A miss also notes where the opener was.
 pub fn expect_closing(self state: &var ParserState, kind: TokenKind, opened: Span) -> Option<&Token> {
     if (state.at(kind)) {
-        return state.next();
+        return state.take(kind);
     }
 
     const note = Note { .span = opened, .message = "to match this opening delimiter" };
@@ -247,14 +325,12 @@ pub fn recover(self state: &var ParserState, sync: &[TokenKind]) {
 // Call this only after consuming its leading token, so the enclosing loop always advances.
 pub fn recover(self state: &var ParserState, sync: &[TokenKind], trailing: TokenKind) {
     state.synchronize(&sync);
-    if (state.at(trailing)) {
-        state.next();
-    }
+    state.eat(trailing);
 }
 
 fn matches_any(kind: &TokenKind, stop: &[TokenKind]) -> bool {
     for (stop) |&s| {
-        if (kind == s) {
+        if (matches(kind, s)) {
             return true;
         }
     }
@@ -268,20 +344,21 @@ fn synchronize(self state: &var ParserState, stop: &[TokenKind]) {
     var depth: u64 = 0;
 
     while (state.peek() is ::Some |&token|) {
-        if (token.kind is ::end_of_file) {
+        if (token.kind == ::end_of_file) {
             return;
         }
 
-        if (token.kind is ::op_parenthesis_left
-                || token.kind is ::op_bracket_left
-                || token.kind is ::op_brace_left) {
+        if (token.kind == ::op_parenthesis_left
+                || token.kind == ::op_bracket_left
+                || token.kind == ::op_brace_left) {
             depth += 1;
-        } else if (token.kind is ::op_parenthesis_right
-                || token.kind is ::op_bracket_right
-                || token.kind is ::op_brace_right) {
+        } else if (token.kind == ::op_parenthesis_right
+                || token.kind == ::op_bracket_right
+                || token.kind == ::op_brace_right) {
             if (depth == 0) {
                 return;
             }
+
             depth -= 1;
         } else if (depth == 0 && matches_any(&token.kind, &stop)) {
             return;

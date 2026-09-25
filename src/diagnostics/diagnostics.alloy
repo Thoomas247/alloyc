@@ -12,7 +12,8 @@ type Severity = enum {
 pub type Expectation = enum {
     Token: TokenKind,
     Identifier,
-    Definition
+    Definition,
+    ReceiverKind, // &, &var, *, *var
 };
 
 pub type Context = enum {
@@ -24,7 +25,8 @@ pub type Context = enum {
     FnDef,
     MacroDef,
     ExternDef,
-    Function
+    Function,
+    Type
 };
 
 pub type Note = struct {
