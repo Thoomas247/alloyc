@@ -713,11 +713,19 @@ fn parse_param(self state: &var ParserState) -> Param {
 // type = type_modifier ( base_type | type ) ;
 fn parse_type(self state: &var ParserState) -> Type {
     const start = state.enter(::Type);
-    var ok = true;
 
-    const type_modifier = state.parse_type_modifier();
+    const modifier = state.parse_type_modifier();
 
-    panic;
+    // a modifier followed by another one wraps a nested type
+    const base = if (state.at(::op_asterisk) || state.at(::op_ampersand))
+        TypeBase::Nested(&state.alloc(state.parse_type()))
+        else TypeBase::Base(state.parse_base_type());
+
+    return Type {
+        .span = state.leave(start),
+        .modifier = modifier,
+        .base = base
+    };
 }
 
 // type_modifier = /* none */ | "*" | "*" "var" | "&" | "&" "var" ;
