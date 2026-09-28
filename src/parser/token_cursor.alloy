@@ -20,7 +20,7 @@ pub fn TokenCursor::create(tokens: &[Token]) -> TokenCursor {
 // Index of the next non-comment token at or after 'from'.
 fn skip_trivia(tokens: &[Token], from: u64) -> u64 {
     var index = from;
-    while (index < tokens.length() && tokens[index].kind is TokenKind::comment) {
+    while (index < tokens.length() && tokens[index].kind == TokenKind::comment) {
         index += 1;
     }
 

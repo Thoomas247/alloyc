@@ -155,19 +155,23 @@ pub type Param = struct {
 
 /* --- Types --- */
 
-pub type TypeModifier = enum { None, Ptr, PtrVar, Ref, RefVar };
+pub type TypeModifier = enum {
+    None,
+    Ptr,
+    PtrVar,
+    Ref,
+    RefVar
+};
 
 pub type TypeBase = enum {
     Base: BaseType,
-    Nested: &Type,
-    Error: &ErrorNode
+    Nested: &Type
 };
 
 pub fn span(self base: &TypeBase) -> Span {
     return match (base) {
         TypeBase::Base |&v| v.span();
         TypeBase::Nested |&v| v.span;
-        TypeBase::Error |&v| v.span;
     };
 }
 
@@ -184,7 +188,8 @@ pub type BaseType = enum {
     ArrayType: &ArrayType,
     FnType: &FnType,
     ComptimeTypeDescriptor: Span,
-    ComptimeExpr: &ComptimeExpr
+    ComptimeExpr: &ComptimeExpr,
+    Error: &ErrorNode
 };
 
 pub fn span(self base: &BaseType) -> Span {
@@ -196,6 +201,7 @@ pub fn span(self base: &BaseType) -> Span {
         BaseType::FnType |&v| v.span;
         BaseType::ComptimeTypeDescriptor |s| s;
         BaseType::ComptimeExpr |&v| v.span;
+        BaseType::Error |&v| v.span;
     };
 }
 

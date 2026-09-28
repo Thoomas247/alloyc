@@ -64,32 +64,24 @@ fn take(self state: &var ParserState, kind: TokenKind) -> Option<&Token> {
         panic "take saw a token it cannot split";
     };
 
-    const start = state.current_span().start;
-    const end = state.current_span().end;
+    const span = state.current_span();
     state.next();
 
-    state.split_head = Token { .kind = ::op_angle_right, .span = Span { .start = start, .end = start + 1 } };
-    state.split_tail = Token { .kind = rest, .span = Span { .start = start + 1, .end = end } };
+    state.split_head = Token { .kind = ::op_angle_right, .span = Span { .start = span.start, .end = span.start + 1 } };
+    state.split_tail = Token { .kind = rest, .span = Span { .start = span.start + 1, .end = span.end } };
     state.has_split = true;
-    state.cursor.previous_end = start + 1;
+    state.cursor.previous_end = span.start + 1;
     return ::Some(&state.split_head);
 }
 
 // What is left of a token after a leading '>' is taken off it.
 fn angle_remainder(kind: TokenKind) -> Option<TokenKind> {
-    if (kind == ::op_shift_right) {
-        return ::Some(TokenKind::op_angle_right);
-    }
-
-    if (kind == ::op_angle_right_equal) {
-        return ::Some(TokenKind::op_equal);
-    }
-
-    if (kind == ::op_shift_right_equal) {
-        return ::Some(TokenKind::op_angle_right_equal);
-    }
-
-    return ::None;
+    return match (kind) {
+        ::op_shift_right Option::Some(TokenKind::op_angle_right);
+        ::op_angle_right_equal Option::Some(TokenKind::op_equal);
+        ::op_shift_right_equal Option::Some(TokenKind::op_angle_right_equal);
+        else ::None;
+    };
 }
 
 // True when found can be consumed as wanted, splitting if needed.
@@ -178,7 +170,13 @@ pub fn missing_ident(self state: &ParserState) -> Ident {
 // An empty error type at the current token.
 pub fn missing_type(self state: &var ParserState) -> Type {
     const span = Span::empty(state.current_span().start);
-    return Type { .span = span, .modifier = TypeModifier::None, .base = TypeBase::Error(state.error_node(span)) };
+    return Type { .span = span, .modifier = TypeModifier::None, .base = TypeBase::Base(state.missing_base_type()) };
+}
+
+// The placeholder for a base type that failed to parse.
+pub fn missing_base_type(self state: &var ParserState) -> BaseType {
+    const span = Span::empty(state.current_span().start);
+    return BaseType::Error(state.error_node(span));
 }
 
 // The placeholder for a receiver that failed to parse.
@@ -292,7 +290,7 @@ pub fn expected(self state: &var ParserState, what: Expectation) {
 // Every report goes through here so suppression lives in one place.
 // A repeat at the previous offset is dropped and past the cap only counted.
 fn report_expected(self state: &var ParserState, span: Span, what: Expectation, notes: &[Note]) {
-    if (state.diagnostics.entries.length() > 0 && span.start == state.diagnostics.last_error_start) {
+    if (state.diagnostics.last_error_start is ::Some |last| && span.start == last) {
         return;
     }
 
@@ -310,7 +308,7 @@ fn report_expected(self state: &var ParserState, span: Span, what: Expectation, 
             .notes = &state.alloc_array(&notes)
         });
     state.diagnostics.error(&info);
-    state.diagnostics.last_error_start = span.start;
+    state.diagnostics.last_error_start = ::Some(span.start);
 }
 
 /* --- Recovery Functions --- */

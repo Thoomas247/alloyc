@@ -51,13 +51,29 @@ macro import_sync() -> &[TokenKind] {
     return &sync.view();
 }
 
+// A list element's own terminators plus the definition sync.
+// Keeps recovery inside a list from running into the next definition.
+macro element_sync(ends: &[TokenKind]) -> &[TokenKind] {
+    var sync = Vector::empty<TokenKind>();
+
+    for (ends) |end| {
+        sync.push(end);
+    }
+
+    for (#definition_sync()) |def_sync| {
+        sync.push(def_sync);
+    }
+
+    return &sync.view();
+}
+
 // "<" type_param { "," type_param } ">"
 fn parse_type_param_list(self state: &var ParserState, dst: &var Vector<TypeParam>) -> bool {
     const open = state.current_span();
     state.assert(::op_angle_left);
 
     dst.push(state.parse_type_param());
-    while (state.eat(::op_comma)) {
+    while (state.eat(::op_comma) && !state.at(::op_angle_right)) {
         dst.push(state.parse_type_param());
     }
 
@@ -74,7 +90,7 @@ fn parse_type_list(self state: &var ParserState, dst: &var Vector<Type>) -> bool
     state.assert(::op_angle_left);
 
     dst.push(state.parse_type());
-    while (state.eat(::op_comma)) {
+    while (state.eat(::op_comma) && !state.at(::op_angle_right)) {
         dst.push(state.parse_type());
     }
 
@@ -316,7 +332,7 @@ fn parse_interface_fn(self state: &var ParserState) -> InterfaceFn {
     const receiver = if (ok) state.parse_receiver() else state.missing_receiver();
 
     var params = Vector::empty<Param>();
-    while (ok && state.eat(::op_comma)) {
+    while (ok && state.eat(::op_comma) && !state.at(::op_parenthesis_right)) {
         params.push(state.parse_param());
     }
 
@@ -334,7 +350,7 @@ fn parse_interface_fn(self state: &var ParserState) -> InterfaceFn {
     }
 
     if (!ok) {
-        state.recover(&[TokenKind::op_semicolon, TokenKind::kw_fn][..], ::op_semicolon);
+        state.recover(&[::op_semicolon, ::kw_fn][..], ::op_semicolon);
     }
 
     return InterfaceFn {
@@ -358,29 +374,24 @@ fn parse_receiver(self state: &var ParserState) -> Receiver {
         ok = false;
     }
 
-    if (ok && state.eat(::op_ampersand)) {
-        if (state.eat(::kw_var)) {
-            return Receiver::RefVar;
-        }
-
-        return Receiver::Ref;
+    const receiver = if (ok && state.eat(::op_ampersand)) {
+        yield if (state.eat(::kw_var)) Receiver::RefVar else Receiver::Ref;
     } else if (ok && state.eat(::op_asterisk)) {
-        if (state.eat(::kw_var)) {
-            return Receiver::PtrVar;
-        }
-
-        return Receiver::Ptr;
+        yield if (state.eat(::kw_var)) Receiver::PtrVar else Receiver::Ptr;
     } else {
-        state.expected(::ReceiverKind);
+        if (ok) {
+            state.expected(::ReceiverKind);
+        }
 
         ok = false;
-    }
+        yield state.missing_receiver();
+    };
 
     if (!ok) {
-        state.recover(&[::op_comma, ::op_parenthesis_right][..]);
+        state.recover(#element_sync(&[::op_comma][..]));
     }
 
-    return state.missing_receiver();
+    return receiver;
 }
 
 // interface_marker = identifier { "::" identifier } [ "<" type { "," type } ">" ] ;
@@ -399,7 +410,7 @@ fn parse_interface_marker(self state: &var ParserState) -> InterfaceMarker {
     }
 
     if (!ok) {
-        state.recover(&[::op_comma, ::op_equal, ::op_angle_right, ::op_semicolon][..]);
+        state.recover(#element_sync(&[::op_comma, ::op_equal, ::op_angle_right][..]));
     }
 
     return InterfaceMarker {
@@ -473,7 +484,7 @@ fn parse_macro_def(self state: &var ParserState) -> MacroDef {
     if (ok && !state.at(::op_parenthesis_right)) {
         params.push(state.parse_macro_param());
 
-        while (ok && state.eat(::op_comma)) {
+        while (state.eat(::op_comma) && !state.at(::op_parenthesis_right)) {
             params.push(state.parse_macro_param());
         }
     }
@@ -522,7 +533,7 @@ fn parse_macro_param(self state: &var ParserState) -> MacroParam {
     }
 
     if (!ok) {
-        state.recover(&[TokenKind::op_comma, TokenKind::op_parenthesis_right][..]);
+        state.recover(#element_sync(&[::op_comma][..]));
     }
 
     return MacroParam {
@@ -587,6 +598,7 @@ fn parse_extern_params(self state: &var ParserState) -> ExternParams {
 
     if (state.eat(::op_ellipsis)) {
         // only variadic
+        state.eat(::op_comma);
         return ExternParams::Variadic([]);
     }
 
@@ -594,8 +606,9 @@ fn parse_extern_params(self state: &var ParserState) -> ExternParams {
     var params = Vector::empty<Param>();
 
     params.push(state.parse_param());
-    while (state.eat(::op_comma)) {
+    while (state.eat(::op_comma) && !state.at(::op_parenthesis_right)) {
         if (state.eat(::op_ellipsis)) {
+            state.eat(::op_comma);
             is_variadic = true;
             break;
         }
@@ -624,7 +637,7 @@ fn parse_type_param(self state: &var ParserState) -> TypeParam {
     }
 
     if (!ok) {
-        state.recover(&[::op_comma, ::op_parenthesis_right, ::op_angle_right][..]);
+        state.recover(#element_sync(&[::op_comma, ::op_angle_right][..]));
     }
 
     return TypeParam {
@@ -650,7 +663,7 @@ fn parse_function(self state: &var ParserState) -> Function {
     if (ok && !state.at(::op_parenthesis_right)) {
         params.push(state.parse_param());
 
-        while (ok && state.eat(::op_comma)) {
+        while (state.eat(::op_comma) && !state.at(::op_parenthesis_right)) {
             params.push(state.parse_param());
         }
     }
@@ -697,7 +710,7 @@ fn parse_param(self state: &var ParserState) -> Param {
     const type_annotation = if (ok) state.parse_type() else state.missing_type();
 
     if (!ok) {
-        state.recover(&[TokenKind::op_comma, TokenKind::op_parenthesis_right][..]);
+        state.recover(#element_sync(&[::op_comma][..]));
     }
 
     return Param {
@@ -730,7 +743,11 @@ fn parse_type(self state: &var ParserState) -> Type {
 
 // type_modifier = /* none */ | "*" | "*" "var" | "&" | "&" "var" ;
 fn parse_type_modifier(self state: &var ParserState) -> TypeModifier {
-    panic;
+    return if (state.eat(::op_asterisk)) {
+        yield if (state.eat(::kw_var)) TypeModifier::PtrVar else TypeModifier::Ptr;
+    } else if (state.eat(::op_ampersand)) {
+        yield if (state.eat(::kw_var)) TypeModifier::RefVar else TypeModifier::Ref;
+    } else TypeModifier::None;
 }
 
 // base_type = named_type
@@ -741,7 +758,28 @@ fn parse_type_modifier(self state: &var ParserState) -> TypeModifier {
 //           | "#Type"                (* comptime descriptor, §4.4 *)
 //           | comptime_expr ;
 fn parse_base_type(self state: &var ParserState) -> BaseType {
-    panic;
+    const start = state.current_span().start;
+
+    return match (state.current_kind()) {
+        ::identifier BaseType::NamedType(&state.alloc(state.parse_named_type()));
+        ::kw_struct BaseType::StructType(&state.alloc(state.parse_struct_type()));
+        ::kw_enum BaseType::EnumType(&state.alloc(state.parse_enum_type()));
+        ::op_bracket_left BaseType::ArrayType(&state.alloc(state.parse_array_type()));
+        ::op_parenthesis_left BaseType::FnType(&state.alloc(state.parse_fn_type()));
+        ::op_hash {
+            yield if (state.peek(1) is ::Some |t|
+                    && t.kind == ::identifier
+                    && text_equals(&state.src[t.span.start..t.span.end], "Type")) {
+                state.assert(::op_hash);
+                state.assert(::identifier);
+                yield BaseType::ComptimeTypeDescriptor(state.span_from(start));
+            } else BaseType::ComptimeExpr(&state.alloc(state.parse_comptime_expr()));
+        }
+        else {
+            state.expected(::Type);
+            yield state.missing_base_type();
+        }
+    };
 }
 
 // named_type = identifier { "::" identifier } [ "<" type { "," type } ">" ] ;
